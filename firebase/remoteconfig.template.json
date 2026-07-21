@@ -1,0 +1,60 @@
+{
+  "conditions": [],
+  "parameters": {
+    "config_version": {
+      "defaultValue": {"value": "m1-initial"},
+      "description": "Visible version marker used for acceptance testing.",
+      "valueType": "STRING"
+    },
+    "allowed_school_domains": {
+      "defaultValue": {"value": "[\"ucsb.edu\"]"},
+      "description": "JSON array of exact school email domains allowed to register.",
+      "valueType": "JSON"
+    },
+    "allowed_test_emails": {
+      "defaultValue": {
+        "value": "[\"alijonovshohruhmirzo@gmail.com\",\"shohruh@fera-tech.com\",\"shohruxa26@gmail.com\",\"shohruhmirzoalijonov@gmail.com\"]"
+      },
+      "description": "JSON array of exact non-school email addresses allowed for controlled testing.",
+      "valueType": "JSON"
+    },
+    "service_fee_type": {
+      "defaultValue": {"value": "percentage"},
+      "description": "percentage or fixed.",
+      "valueType": "STRING"
+    },
+    "service_fee_value": {
+      "defaultValue": {"value": "10"},
+      "description": "Service fee percentage or dollar amount, depending on type.",
+      "valueType": "NUMBER"
+    },
+    "irs_mileage_rate": {
+      "defaultValue": {"value": "0.76"},
+      "description": "Backend-controlled cost-sharing mileage rate in USD per mile.",
+      "valueType": "NUMBER"
+    },
+    "pricing_mode": {
+      "defaultValue": {"value": "driver_sets_under_cap"},
+      "description": "driver_sets_under_cap or platform_calculated.",
+      "valueType": "STRING"
+    },
+    "refund_rules_json": {
+      "defaultValue": {
+        "value": "[{\"minimumHoursBeforeTrip\":168,\"riderRefundPercentage\":100,\"platformPercentage\":0,\"driverPercentage\":0},{\"minimumHoursBeforeTrip\":1,\"riderRefundPercentage\":50,\"platformPercentage\":10,\"driverPercentage\":40},{\"minimumHoursBeforeTrip\":0,\"riderRefundPercentage\":0,\"platformPercentage\":10,\"driverPercentage\":90}]"
+      },
+      "description": "Ordered cancellation/refund tiers. Server code must enforce these when payments are implemented.",
+      "valueType": "JSON"
+    },
+    "payment_expiration_hours": {
+      "defaultValue": {"value": "24"},
+      "description": "Hours an accepted request stays payable before expiring.",
+      "valueType": "NUMBER"
+    },
+    "trip_auto_complete_hours": {
+      "defaultValue": {"value": "48"},
+      "description": "Backup trip auto-complete window after scheduled time.",
+      "valueType": "NUMBER"
+    }
+  },
+  "parameterGroups": {}
+}

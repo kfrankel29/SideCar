@@ -1,0 +1,9 @@
+{
+  "FIREBASE_API_KEY": "replace-with-your-firebase-web-api-key",
+  "FIREBASE_APP_ID": "replace-with-the-platform-app-id",
+  "FIREBASE_MESSAGING_SENDER_ID": "replace-with-the-sender-id",
+  "FIREBASE_PROJECT_ID": "sidecar-fb0e7",
+  "FIREBASE_STORAGE_BUCKET": "sidecar-fb0e7.firebasestorage.app",
+  "SIDECAR_GOOGLE_IOS_CLIENT_ID": "replace-with-the-ios-oauth-client-id",
+  "SIDECAR_GOOGLE_SERVER_CLIENT_ID": "replace-with-the-web-oauth-client-id"
+}

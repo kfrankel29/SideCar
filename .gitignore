@@ -1,0 +1,43 @@
+# macOS and editors
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Local-only working material and release artifacts
+.local/
+artifacts/
+docs/release/private/
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+**/service-account*.json
+**/*firebase-adminsdk*.json
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.pem
+**/*.mobileprovision
+**/key.properties
+**/GoogleService-Info.plist
+**/google-services.json
+**/firebase_options.dart
+apps/mobile/.local/
+apps/mobile/ios/Flutter/GoogleAuth.xcconfig
+firebase/functions/.secret.local
+
+# Flutter/Dart generated output (also covered by apps/mobile/.gitignore)
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/build/
+**/coverage/
+
+# Firebase local tooling
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
