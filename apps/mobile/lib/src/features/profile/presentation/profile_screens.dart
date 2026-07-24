@@ -69,6 +69,10 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   }
 
   Future<void> _leaveProfileSetup() async {
+    if (context.canPop()) {
+      context.pop();
+      return;
+    }
     await ref.read(authRepositoryProvider).signOut();
     if (mounted) context.go(AppRoutes.welcome);
   }
@@ -421,7 +425,13 @@ class PhotoPermissionScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
-      onBack: () => context.go(AppRoutes.profile),
+      onBack: () {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go(AppRoutes.profile);
+        }
+      },
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(DeviceSettings.openAppSettings),
         child: const Text('Open Settings'),
@@ -550,7 +560,13 @@ class ProfileGateScreen extends ConsumerWidget {
     final hasRole = profile?.primaryRole != null;
     return SideCarScaffold(
       showBack: true,
-      onBack: () => context.go(AppRoutes.onboarded),
+      onBack: () {
+        if (context.canPop()) {
+          context.pop();
+        } else {
+          context.go(AppRoutes.onboarded);
+        }
+      },
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(
           isComplete && hasRole

@@ -234,7 +234,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           .signIn(email: _email.text, password: _password.text);
       if (!mounted) return;
       if (!user.emailVerified) {
-        context.go(
+        context.push(
           '${AppRoutes.verifyEmail}?email=${Uri.encodeQueryComponent(user.email)}',
         );
         return;
@@ -350,7 +350,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             Center(
               child: TextButton(
                 onPressed: AppHaptics.wrap(
-                  () => context.pushReplacement(AppRoutes.signUp),
+                  () => context.push(AppRoutes.signUp),
                 ),
                 child: const Text('New here? Sign up'),
               ),
@@ -411,7 +411,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
           );
       if (!mounted) return;
       if (!user.emailVerified) {
-        context.go(
+        context.push(
           '${AppRoutes.verifyEmail}?email=${Uri.encodeQueryComponent(user.email)}',
         );
         return;
@@ -700,7 +700,8 @@ class _EmailVerificationScreenState
       showBack: true,
       onBack: () async {
         await ref.read(authRepositoryProvider).signOut();
-        if (context.mounted) context.go(AppRoutes.welcome);
+        if (!context.mounted) return;
+        _popOrGo(context, AppRoutes.welcome);
       },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

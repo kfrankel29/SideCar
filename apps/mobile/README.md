@@ -69,8 +69,10 @@ The iOS workspace includes Xcode Cloud scripts that install Flutter and
 CocoaPods, restore the ignored Firebase configuration, run static analysis and
 tests, and prepare the release archive.
 
-Add `GOOGLE_SERVICE_INFO_PLIST_BASE64` as a secret workflow environment
-variable. Its value is the Base64-encoded production
-`GoogleService-Info.plist`. Configure the workflow to archive the `Runner`
+Add the following Firebase iOS values as secret workflow environment variables:
+`FIREBASE_IOS_CLIENT_ID`, `FIREBASE_IOS_REVERSED_CLIENT_ID`,
+`FIREBASE_IOS_API_KEY`, `FIREBASE_IOS_GCM_SENDER_ID`,
+`FIREBASE_IOS_PROJECT_ID`, `FIREBASE_IOS_STORAGE_BUCKET`, and
+`FIREBASE_IOS_GOOGLE_APP_ID`. Configure the workflow to archive the `Runner`
 scheme on changes to the release branch and distribute successful archives to
-the internal TestFlight group. Set the first Xcode Cloud build number to `16`.
+the internal TestFlight group. Set the first Xcode Cloud build number to `17`.

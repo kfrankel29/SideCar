@@ -8,12 +8,39 @@ ios_path="$app_path/ios"
 firebase_plist="$ios_path/Runner/GoogleService-Info.plist"
 google_auth_config="$ios_path/Flutter/GoogleAuth.xcconfig"
 
-if [ -z "${GOOGLE_SERVICE_INFO_PLIST_BASE64:-}" ]; then
-  echo "Missing GOOGLE_SERVICE_INFO_PLIST_BASE64 Xcode Cloud secret." >&2
-  exit 1
-fi
+required_firebase_variables="
+FIREBASE_IOS_CLIENT_ID
+FIREBASE_IOS_REVERSED_CLIENT_ID
+FIREBASE_IOS_API_KEY
+FIREBASE_IOS_GCM_SENDER_ID
+FIREBASE_IOS_PROJECT_ID
+FIREBASE_IOS_STORAGE_BUCKET
+FIREBASE_IOS_GOOGLE_APP_ID
+"
 
-printf '%s' "$GOOGLE_SERVICE_INFO_PLIST_BASE64" | /usr/bin/base64 -D > "$firebase_plist"
+for variable_name in $required_firebase_variables; do
+  eval "variable_value=\${$variable_name:-}"
+  if [ -z "$variable_value" ]; then
+    echo "Missing $variable_name Xcode Cloud variable." >&2
+    exit 1
+  fi
+done
+
+/usr/bin/plutil -create xml1 "$firebase_plist"
+/usr/bin/plutil -insert CLIENT_ID -string "$FIREBASE_IOS_CLIENT_ID" "$firebase_plist"
+/usr/bin/plutil -insert REVERSED_CLIENT_ID -string "$FIREBASE_IOS_REVERSED_CLIENT_ID" "$firebase_plist"
+/usr/bin/plutil -insert API_KEY -string "$FIREBASE_IOS_API_KEY" "$firebase_plist"
+/usr/bin/plutil -insert GCM_SENDER_ID -string "$FIREBASE_IOS_GCM_SENDER_ID" "$firebase_plist"
+/usr/bin/plutil -insert PLIST_VERSION -string "1" "$firebase_plist"
+/usr/bin/plutil -insert BUNDLE_ID -string "com.kaileefrankel.sidecar" "$firebase_plist"
+/usr/bin/plutil -insert PROJECT_ID -string "$FIREBASE_IOS_PROJECT_ID" "$firebase_plist"
+/usr/bin/plutil -insert STORAGE_BUCKET -string "$FIREBASE_IOS_STORAGE_BUCKET" "$firebase_plist"
+/usr/bin/plutil -insert IS_ADS_ENABLED -bool false "$firebase_plist"
+/usr/bin/plutil -insert IS_ANALYTICS_ENABLED -bool false "$firebase_plist"
+/usr/bin/plutil -insert IS_APPINVITE_ENABLED -bool true "$firebase_plist"
+/usr/bin/plutil -insert IS_GCM_ENABLED -bool true "$firebase_plist"
+/usr/bin/plutil -insert IS_SIGNIN_ENABLED -bool true "$firebase_plist"
+/usr/bin/plutil -insert GOOGLE_APP_ID -string "$FIREBASE_IOS_GOOGLE_APP_ID" "$firebase_plist"
 /usr/bin/plutil -lint "$firebase_plist"
 
 bundle_id=$(/usr/libexec/PlistBuddy -c "Print :BUNDLE_ID" "$firebase_plist")
