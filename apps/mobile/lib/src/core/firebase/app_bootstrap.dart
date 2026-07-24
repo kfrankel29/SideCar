@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sidecar/src/core/config/business_config_repository.dart';
 import 'package:sidecar/src/core/firebase/firebase_runtime_options.dart';
+import 'package:sidecar/src/core/platform/install_state.dart';
 import 'package:sidecar/src/features/auth/data/firebase_auth_repository.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/data/firebase_profile_repository.dart';
@@ -39,10 +40,14 @@ class AppBootstrap {
 
   static Future<AppBootstrapResult> initialize() async {
     try {
-      if (!FirebaseRuntimeOptions.isConfigured) {
+      if (kIsWeb && !FirebaseRuntimeOptions.isConfigured) {
         throw StateError('Firebase build configuration is missing.');
       }
-      await Firebase.initializeApp(options: FirebaseRuntimeOptions.current);
+      await Firebase.initializeApp(
+        options: FirebaseRuntimeOptions.isConfigured
+            ? FirebaseRuntimeOptions.current
+            : null,
+      );
       Object? appCheckError;
       try {
         await FirebaseAppCheck.instance.activate(
@@ -59,6 +64,7 @@ class AppBootstrap {
       }
 
       final auth = FirebaseAuth.instance;
+      await InstallState.clearRestoredSessionIfNeeded(auth.signOut);
       final functions = FirebaseFunctions.instanceFor(region: 'us-central1');
       return AppBootstrapResult(
         firebaseReady: true,

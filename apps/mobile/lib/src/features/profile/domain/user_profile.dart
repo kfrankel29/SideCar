@@ -6,10 +6,13 @@ class UserProfile {
     required this.firstName,
     required this.lastName,
     required this.school,
-    required this.homeBase,
-    required this.major,
-    required this.graduationYear,
     required this.photoUrl,
+    this.age = 0,
+    this.gender = '',
+    this.language = '',
+    this.homeBase = '',
+    this.major = '',
+    this.graduationYear = 0,
     this.primaryRole,
   });
 
@@ -17,9 +20,15 @@ class UserProfile {
   final String firstName;
   final String lastName;
   final String school;
+  final int age;
+  final String gender;
+  final String language;
+
+  // Kept as optional extension points for later rider-specific profile work.
   final String homeBase;
   final String major;
   final int graduationYear;
+
   final String photoUrl;
   final PrimaryRole? primaryRole;
 
@@ -29,9 +38,10 @@ class UserProfile {
     return firstName.trim().isNotEmpty &&
         lastName.trim().isNotEmpty &&
         school.trim().isNotEmpty &&
-        homeBase.trim().isNotEmpty &&
-        major.trim().isNotEmpty &&
-        graduationYear > 0 &&
+        age >= 18 &&
+        age <= 100 &&
+        gender.trim().isNotEmpty &&
+        language.trim().isNotEmpty &&
         photoUrl.trim().isNotEmpty;
   }
 
@@ -42,6 +52,9 @@ class UserProfile {
       firstName: json['firstName'] as String? ?? '',
       lastName: json['lastName'] as String? ?? '',
       school: json['school'] as String? ?? '',
+      age: (json['age'] as num?)?.toInt() ?? 0,
+      gender: json['gender'] as String? ?? '',
+      language: json['language'] as String? ?? '',
       homeBase: json['homeBase'] as String? ?? '',
       major: json['major'] as String? ?? '',
       graduationYear: (json['graduationYear'] as num?)?.toInt() ?? 0,
@@ -60,6 +73,9 @@ class UserProfile {
       'lastName': lastName.trim(),
       'displayName': displayName,
       'school': school.trim(),
+      'age': age,
+      'gender': gender.trim(),
+      'language': language.trim(),
       'homeBase': homeBase.trim(),
       'major': major.trim(),
       'graduationYear': graduationYear,
@@ -69,12 +85,21 @@ class UserProfile {
     };
   }
 
-  UserProfile copyWith({String? photoUrl, PrimaryRole? primaryRole}) {
+  UserProfile copyWith({
+    int? age,
+    String? gender,
+    String? language,
+    String? photoUrl,
+    PrimaryRole? primaryRole,
+  }) {
     return UserProfile(
       userId: userId,
       firstName: firstName,
       lastName: lastName,
       school: school,
+      age: age ?? this.age,
+      gender: gender ?? this.gender,
+      language: language ?? this.language,
       homeBase: homeBase,
       major: major,
       graduationYear: graduationYear,

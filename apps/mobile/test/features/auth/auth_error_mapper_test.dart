@@ -18,16 +18,38 @@ void main() {
     test('keeps actionable server validation messages', () {
       final failure = AuthErrorMapper.functions(
         code: 'permission-denied',
-        serverMessage: 'Use an approved school email.',
+        serverMessage: 'Students only — ucsb.edu email required',
       );
 
-      expect(failure.message, 'Use an approved school email.');
+      expect(failure.message, 'Students only — ucsb.edu email required');
+    });
+
+    test('does not show the old reopen-app session error', () {
+      final failure = AuthErrorMapper.functions(
+        code: 'unauthenticated',
+        serverMessage: 'Unauthenticated',
+      );
+
+      expect(
+        failure.message,
+        'We could not verify this request. Please try again.',
+      );
+      expect(failure.message, isNot(contains('Reopen the app')));
     });
 
     test('maps temporary backend failures to a retry message', () {
       final failure = AuthErrorMapper.functions(code: 'unavailable');
 
       expect(failure.message, contains('temporarily unavailable'));
+    });
+
+    test('shows a clear missing-account reset error', () {
+      final failure = AuthErrorMapper.functions(
+        code: 'not-found',
+        serverMessage: 'No account was found for this email.',
+      );
+
+      expect(failure.message, 'That account could not be found.');
     });
   });
 

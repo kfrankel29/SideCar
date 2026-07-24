@@ -7,9 +7,9 @@ void main() {
     firstName: 'Maya',
     lastName: 'Chen',
     school: 'UC Santa Barbara',
-    homeBase: 'San Mateo',
-    major: 'Economics',
-    graduationYear: 2028,
+    age: 20,
+    gender: 'Female',
+    language: 'English',
     photoUrl: 'https://example.test/profile.jpg',
   );
 
@@ -23,7 +23,9 @@ void main() {
 
     expect(json['displayName'], 'Maya Chen');
     expect(json['profileComplete'], isTrue);
-    expect(json['graduationYear'], 2028);
+    expect(json['age'], 20);
+    expect(json['gender'], 'Female');
+    expect(json['language'], 'English');
   });
 
   test('maps a persisted primary role', () {

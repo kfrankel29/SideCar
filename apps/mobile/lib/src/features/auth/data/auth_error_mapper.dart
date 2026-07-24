@@ -25,7 +25,9 @@ abstract final class AuthErrorMapper {
         'Too many attempts. Please wait before trying again.',
       ),
       'unauthenticated' =>
-        'Your session could not be verified. Reopen the app and try again.',
+        serverMessage?.trim() == 'Please sign in again.'
+            ? 'Please sign in again.'
+            : 'We could not verify this request. Please try again.',
       'aborted' => 'The request was interrupted. Please try again.',
       'not-found' => 'That account could not be found.',
       'internal' ||

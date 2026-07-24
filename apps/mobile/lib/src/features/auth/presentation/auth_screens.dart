@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:sidecar/src/core/config/business_config_repository.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
 import 'package:sidecar/src/core/widgets/sidecar_scaffold.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
+import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
@@ -20,11 +22,28 @@ String? _emailError(String value) {
   return null;
 }
 
+const _studentEmailRequired = 'Students only — ucsb.edu email required';
+
+void _popOrGo(BuildContext context, String fallbackRoute) {
+  if (context.canPop()) {
+    context.pop();
+  } else {
+    context.go(fallbackRoute);
+  }
+}
+
 String? _passwordError(String value) {
   if (value.length < 8 || !RegExp(r'\d').hasMatch(value)) {
     return 'Use 8+ characters with at least one number.';
   }
   return null;
+}
+
+String _routeForProfile(UserProfile profile) {
+  if (!profile.isComplete) return AppRoutes.profile;
+  return profile.primaryRole == null
+      ? AppRoutes.onboarded
+      : AppRoutes.profileGate;
 }
 
 class OpeningScreen extends ConsumerStatefulWidget {
@@ -47,29 +66,36 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
     await Future<void>.delayed(const Duration(milliseconds: 1100));
     if (!mounted) return;
 
-    final user = ref.read(authRepositoryProvider).currentUser;
-    if (user == null) {
-      context.go(AppRoutes.welcome);
-      return;
-    }
-    if (!user.emailVerified) {
-      context.go(
-        '${AppRoutes.verifyEmail}?email=${Uri.encodeQueryComponent(user.email)}',
-      );
-      return;
-    }
-
     try {
+      final authRepository = ref.read(authRepositoryProvider);
+      final user = await authRepository.validateCurrentSession();
+      if (!mounted) return;
+      if (user == null) {
+        context.go(AppRoutes.welcome);
+        return;
+      }
       final profile = await ref
           .read(profileRepositoryProvider)
           .loadCurrentProfile();
       if (!mounted) return;
-      if (profile?.isComplete != true) {
-        context.go(AppRoutes.profile);
-      } else {
-        context.go(AppRoutes.onboarded);
+      if (profile == null) {
+        await authRepository.signOut();
+        if (mounted) context.go(AppRoutes.welcome);
+        return;
       }
+      if (!user.emailVerified) {
+        context.go(
+          '${AppRoutes.verifyEmail}?email=${Uri.encodeQueryComponent(user.email)}',
+        );
+        return;
+      }
+      context.go(_routeForProfile(profile));
     } on Object {
+      try {
+        await ref.read(authRepositoryProvider).signOut();
+      } on Object {
+        // Server state could not be verified, so continue to the signed-out UI.
+      }
       if (mounted) context.go(AppRoutes.welcome);
     }
   }
@@ -164,7 +190,7 @@ class WelcomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 27),
               Text(
-                'Students only · school email required',
+                _studentEmailRequired,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -217,11 +243,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           .read(profileRepositoryProvider)
           .loadCurrentProfile();
       if (!mounted) return;
-      context.go(
-        profile?.isComplete == true ? AppRoutes.onboarded : AppRoutes.profile,
-      );
+      if (profile == null) {
+        await ref.read(authRepositoryProvider).signOut();
+        if (mounted) context.go(AppRoutes.welcome);
+        return;
+      }
+      context.go(_routeForProfile(profile));
     } on AppFailure catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -238,11 +267,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           .read(profileRepositoryProvider)
           .loadCurrentProfile();
       if (!mounted) return;
-      context.go(
-        profile?.isComplete == true ? AppRoutes.onboarded : AppRoutes.profile,
-      );
+      if (profile == null) {
+        await ref.read(authRepositoryProvider).signOut();
+        if (mounted) context.go(AppRoutes.welcome);
+        return;
+      }
+      context.go(_routeForProfile(profile));
     } on AppFailure catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -252,6 +284,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
+      onBack: () => _popOrGo(context, AppRoutes.welcome),
       fillViewport: true,
       child: Form(
         key: _formKey,
@@ -363,6 +396,11 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
+      final config = await ref.read(businessConfigRepositoryProvider).refresh();
+      if (!config.allowsEmail(_email.text)) {
+        if (mounted) setState(() => _domainError = _studentEmailRequired);
+        return;
+      }
       final user = await ref
           .read(authRepositoryProvider)
           .createStudentAccount(
@@ -382,9 +420,12 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
           .read(profileRepositoryProvider)
           .loadCurrentProfile();
       if (!mounted) return;
-      context.go(
-        profile?.isComplete == true ? AppRoutes.onboarded : AppRoutes.profile,
-      );
+      if (profile == null) {
+        await ref.read(authRepositoryProvider).signOut();
+        if (mounted) context.go(AppRoutes.welcome);
+        return;
+      }
+      context.go(_routeForProfile(profile));
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } on Object {
@@ -402,6 +443,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
+      onBack: () => _popOrGo(context, AppRoutes.welcome),
       child: Form(
         key: _formKey,
         child: Column(
@@ -409,7 +451,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
           children: [
             const ScreenIntro(
               title: 'Create an account',
-              description: 'Use your .edu email to sign up for SideCar.',
+              description: 'Use your ucsb.edu email to sign up for SideCar.',
             ),
             const SizedBox(height: 28),
             Row(
@@ -454,6 +496,11 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
                 autocorrect: false,
+                onChanged: (_) {
+                  if (_domainError != null) {
+                    setState(() => _domainError = null);
+                  }
+                },
                 validator: (value) => _emailError(value ?? ''),
                 decoration: InputDecoration(errorText: _domainError),
               ),
@@ -630,7 +677,7 @@ class _EmailVerificationScreenState
       await ref.read(authRepositoryProvider).verifyEmailCode(_code);
       if (mounted) context.go(AppRoutes.profile);
     } on AppFailure catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -643,7 +690,7 @@ class _EmailVerificationScreenState
       setState(() => _error = null);
       _startTimer();
     } on AppFailure catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
     }
   }
 
@@ -651,6 +698,10 @@ class _EmailVerificationScreenState
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
+      onBack: () async {
+        await ref.read(authRepositoryProvider).signOut();
+        if (context.mounted) context.go(AppRoutes.welcome);
+      },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -693,6 +744,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   bool _loading = false;
+  String? _domainError;
   String? _error;
 
   @override
@@ -702,12 +754,18 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
     setState(() {
-      _loading = true;
+      _domainError = null;
       _error = null;
     });
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _loading = true);
     try {
+      final config = await ref.read(businessConfigRepositoryProvider).refresh();
+      if (!config.allowsEmail(_email.text)) {
+        if (mounted) setState(() => _domainError = _studentEmailRequired);
+        return;
+      }
       await ref
           .read(authRepositoryProvider)
           .requestPasswordResetCode(_email.text);
@@ -716,7 +774,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
         '${AppRoutes.resetCode}?email=${Uri.encodeQueryComponent(_email.text.trim().toLowerCase())}',
       );
     } on AppFailure catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -726,6 +784,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
+      onBack: () => _popOrGo(context, AppRoutes.login),
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(_loading ? null : _submit),
         child: Text(_loading ? 'Sending…' : 'Send reset code'),
@@ -748,7 +807,13 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.done,
                 onFieldSubmitted: (_) => _submit(),
+                onChanged: (_) {
+                  if (_domainError != null) {
+                    setState(() => _domainError = null);
+                  }
+                },
                 validator: (value) => _emailError(value ?? ''),
+                decoration: InputDecoration(errorText: _domainError),
               ),
             ),
             const SizedBox(height: 18),
@@ -821,7 +886,7 @@ class _PasswordResetCodeScreenState
         '${AppRoutes.newPassword}?email=${Uri.encodeQueryComponent(widget.email)}&token=${Uri.encodeQueryComponent(token)}',
       );
     } on AppFailure catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -831,6 +896,7 @@ class _PasswordResetCodeScreenState
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
+      onBack: () => _popOrGo(context, AppRoutes.forgotPassword),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -921,7 +987,7 @@ class _NewPasswordScreenState extends ConsumerState<NewPasswordScreen> {
           );
       if (mounted) context.go(AppRoutes.passwordResetComplete);
     } on AppFailure catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -931,6 +997,10 @@ class _NewPasswordScreenState extends ConsumerState<NewPasswordScreen> {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
+      onBack: () => _popOrGo(
+        context,
+        '${AppRoutes.resetCode}?email=${Uri.encodeQueryComponent(widget.email)}',
+      ),
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(_loading ? null : _submit),
         child: Text(_loading ? 'Updating…' : 'Update password'),
@@ -992,6 +1062,7 @@ class PasswordResetCompleteScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
+      onBack: () => _popOrGo(context, AppRoutes.login),
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(() => context.go(AppRoutes.login)),
         child: const Text('Back to sign in'),

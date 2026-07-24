@@ -31,6 +31,27 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<AccountUser?> validateCurrentSession() async {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+
+    try {
+      await user.reload();
+      final refreshedUser = _auth.currentUser;
+      if (refreshedUser == null) return null;
+      await refreshedUser.getIdToken(true);
+      return _mapUser(refreshedUser);
+    } on Object {
+      try {
+        await _auth.signOut();
+      } on Object {
+        // Session validation has already failed. Routing must still fail closed.
+      }
+      return null;
+    }
+  }
+
+  @override
   Future<AccountUser> createStudentAccount({
     required String firstName,
     required String lastName,
@@ -261,6 +282,9 @@ class UnavailableAuthRepository implements AuthRepository {
 
   @override
   AccountUser? get currentUser => null;
+
+  @override
+  Future<AccountUser?> validateCurrentSession() async => null;
 
   @override
   Future<void> completePasswordReset({

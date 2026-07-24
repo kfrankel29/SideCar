@@ -31,7 +31,10 @@ class FirebaseProfileRepository implements ProfileRepository {
   Future<UserProfile?> loadCurrentProfile() async {
     final user = _auth.currentUser;
     if (user == null) return null;
-    final snapshot = await _firestore.collection('users').doc(user.uid).get();
+    final snapshot = await _firestore
+        .collection('users')
+        .doc(user.uid)
+        .get(const GetOptions(source: Source.server));
     final data = snapshot.data();
     return data == null ? null : UserProfile.fromJson(snapshot.id, data);
   }

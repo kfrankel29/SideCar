@@ -21,6 +21,17 @@ import UIKit
       binaryMessenger: registrar.messenger()
     )
     channel.setMethodCallHandler { call, result in
+      if call.method == "consumeFreshInstall" {
+        let key = "sidecar.install.registered"
+        let defaults = UserDefaults.standard
+        let isFreshInstall = !defaults.bool(forKey: key)
+        if isFreshInstall {
+          defaults.set(true, forKey: key)
+        }
+        result(isFreshInstall)
+        return
+      }
+
       guard call.method == "openAppSettings" else {
         result(FlutterMethodNotImplemented)
         return

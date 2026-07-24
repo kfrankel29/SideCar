@@ -22,10 +22,11 @@ class ProfileSetupScreen extends ConsumerStatefulWidget {
 
 class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _homeBase = TextEditingController();
-  final _majorAndYear = TextEditingController();
+  final _age = TextEditingController();
   final _picker = ImagePicker();
   UserProfile? _existing;
+  String _gender = 'Female';
+  String _language = 'English';
   Uint8List? _photoBytes;
   String _photoContentType = 'image/jpeg';
   bool _loading = true;
@@ -45,12 +46,11 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
           .loadCurrentProfile();
       if (!mounted) return;
       _existing = profile;
-      _homeBase.text = profile?.homeBase ?? '';
-      if (profile != null &&
-          profile.major.isNotEmpty &&
-          profile.graduationYear > 0) {
-        _majorAndYear.text = '${profile.major} · ${profile.graduationYear}';
-      }
+      _age.text = profile?.age == 0 ? '' : profile!.age.toString();
+      _gender = profile?.gender.isNotEmpty == true ? profile!.gender : 'Female';
+      _language = profile?.language.isNotEmpty == true
+          ? profile!.language
+          : 'English';
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } on Object {
@@ -64,9 +64,13 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
 
   @override
   void dispose() {
-    _homeBase.dispose();
-    _majorAndYear.dispose();
+    _age.dispose();
     super.dispose();
+  }
+
+  Future<void> _leaveProfileSetup() async {
+    await ref.read(authRepositoryProvider).signOut();
+    if (mounted) context.go(AppRoutes.welcome);
   }
 
   Future<void> _choosePhoto() async {
@@ -136,20 +140,27 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
         school: _existing?.school.isNotEmpty == true
             ? _existing!.school
             : 'UC Santa Barbara',
-        homeBase: _homeBase.text,
-        major: _parsedMajor,
-        graduationYear: _parsedGraduationYear!,
+        age: int.parse(_age.text.trim()),
+        gender: _gender,
+        language: _language,
+        homeBase: _existing?.homeBase ?? '',
+        major: _existing?.major ?? '',
+        graduationYear: _existing?.graduationYear ?? 0,
         photoUrl: photoUrl,
         primaryRole: _existing?.primaryRole,
       );
       await repository.saveProfile(profile);
+      ref.invalidate(currentProfileProvider);
+      await ref.read(currentProfileProvider.future);
       if (mounted) context.go(AppRoutes.onboarded);
     } on AppFailure catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
     } on Object {
-      setState(
-        () => _error = 'We could not save your profile. Please try again.',
-      );
+      if (mounted) {
+        setState(
+          () => _error = 'We could not save your profile. Please try again.',
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -158,20 +169,6 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   String _capitalize(String value) {
     if (value.isEmpty) return value;
     return '${value[0].toUpperCase()}${value.substring(1).toLowerCase()}';
-  }
-
-  int? get _parsedGraduationYear {
-    final match = RegExp(
-      r'(20\d{2})\s*$',
-    ).firstMatch(_majorAndYear.text.trim());
-    return match == null ? null : int.tryParse(match.group(1)!);
-  }
-
-  String get _parsedMajor {
-    return _majorAndYear.text
-        .trim()
-        .replaceFirst(RegExp(r'\s*[·,-]?\s*20\d{2}\s*$'), '')
-        .trim();
   }
 
   @override
@@ -187,9 +184,10 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
 
     return SideCarScaffold(
       showBack: true,
+      onBack: _leaveProfileSetup,
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(_saving ? null : _submit),
-        child: Text(_saving ? 'Saving…' : 'Finish up'),
+        child: Text(_saving ? 'Saving…' : 'Continue'),
       ),
       child: Form(
         key: _formKey,
@@ -244,58 +242,77 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 30),
-            FormFieldBlock(
-              label: 'Home base (Bay Area)',
-              child: TextFormField(
-                controller: _homeBase,
-                textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(hintText: 'San Mateo'),
-                validator: (value) =>
-                    value == null || value.trim().isEmpty ? 'Required' : null,
-              ),
+            const SizedBox(height: 32),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: FormFieldBlock(
+                    label: 'Age',
+                    child: TextFormField(
+                      controller: _age,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.next,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(3),
+                      ],
+                      decoration: const InputDecoration(hintText: '20'),
+                      validator: (value) {
+                        final age = int.tryParse(value?.trim() ?? '');
+                        if (age == null || age < 18 || age > 100) {
+                          return 'Enter a valid age';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FormFieldBlock(
+                    label: 'Gender',
+                    child: DropdownButtonFormField<String>(
+                      isExpanded: true,
+                      initialValue: _gender,
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'Female',
+                          child: Text('Female'),
+                        ),
+                        DropdownMenuItem(value: 'Male', child: Text('Male')),
+                        DropdownMenuItem(
+                          value: 'Non-binary',
+                          child: Text('Non-binary'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Prefer not to say',
+                          child: Text('Prefer not to say'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) setState(() => _gender = value);
+                      },
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 18),
             FormFieldBlock(
-              label: 'Major & year',
-              child: TextFormField(
-                controller: _majorAndYear,
-                textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(hintText: 'Economics · 2028'),
-                validator: (_) {
-                  final year = _parsedGraduationYear;
-                  if (_parsedMajor.isEmpty ||
-                      year == null ||
-                      year < 2026 ||
-                      year > 2040) {
-                    return 'Enter a major and graduation year';
-                  }
-                  return null;
+              label: 'Language',
+              child: DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: _language,
+                items: const [
+                  DropdownMenuItem(value: 'English', child: Text('English')),
+                  DropdownMenuItem(value: 'Spanish', child: Text('Spanish')),
+                  DropdownMenuItem(value: 'Other', child: Text('Other')),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _language = value);
                 },
               ),
-            ),
-            const SizedBox(height: 30),
-            const Divider(),
-            const SizedBox(height: 18),
-            Text(
-              'PAYMENTS',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(fontSize: 10, letterSpacing: 0.7),
-            ),
-            const SizedBox(height: 12),
-            const _SettingsRow(
-              title: 'Connect Stripe to pay for rides',
-              subtitle: 'Secure checkout, instant refunds & credits',
-            ),
-            const SizedBox(height: 16),
-            const Divider(),
-            const SizedBox(height: 18),
-            Text(
-              "You'll set ride preferences — like who you match with — when you search for a ride.",
-              style: Theme.of(context).textTheme.bodySmall,
             ),
             SideCarErrorText(_error),
           ],
@@ -360,58 +377,39 @@ class _PhotoSourceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: AppHaptics.wrap(onTap),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          border: Border.all(color: AppColors.border),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 25),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: Theme.of(context).textTheme.labelLarge),
-                  Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({required this.title, required this.subtitle});
-
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Semantics(
+      button: true,
+      label: '$title. $subtitle',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: AppHaptics.wrap(onTap),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
             children: [
-              Text(title, style: Theme.of(context).textTheme.labelLarge),
-              const SizedBox(height: 3),
-              Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+              Icon(icon, size: 25),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: Theme.of(context).textTheme.labelLarge),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded),
             ],
           ),
         ),
-        const Icon(Icons.chevron_right_rounded, color: AppColors.mutedInk),
-      ],
+      ),
     );
   }
 }
@@ -423,6 +421,7 @@ class PhotoPermissionScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
+      onBack: () => context.go(AppRoutes.profile),
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(DeviceSettings.openAppSettings),
         child: const Text('Open Settings'),
@@ -458,10 +457,10 @@ class OnboardedScreen extends ConsumerWidget {
   ) async {
     try {
       await ref.read(profileRepositoryProvider).setPrimaryRole(role);
+      ref.invalidate(currentProfileProvider);
+      await ref.read(currentProfileProvider.future);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('Preference saved.')));
+      context.go(AppRoutes.profileGate);
     } on AppFailure catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
@@ -481,15 +480,33 @@ class OnboardedScreen extends ConsumerWidget {
           child: Column(
             children: [
               const Spacer(flex: 3),
-              const Icon(Icons.verified_rounded, size: 22),
-              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.softSurface,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_rounded, size: 18),
+                    SizedBox(width: 5),
+                    Text('Verified'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 22),
               Text(
                 'Welcome aboard, $firstName',
+                textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineLarge,
               ),
               const SizedBox(height: 8),
               Text(
-                "You're all set. How will you mostly use SideCar?",
+                "You're all set!\nHow will you mostly use SideCar?",
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
@@ -498,18 +515,19 @@ class OnboardedScreen extends ConsumerWidget {
                 onPressed: AppHaptics.wrap(
                   () => _chooseRole(context, ref, PrimaryRole.rider),
                 ),
-                child: const Text('I need rides'),
+                child: const Text('Book a ride'),
               ),
               const SizedBox(height: 10),
               OutlinedButton(
                 onPressed: AppHaptics.wrap(
                   () => _chooseRole(context, ref, PrimaryRole.driver),
                 ),
-                child: const Text("I'm driving"),
+                child: const Text('Post a ride'),
               ),
               const SizedBox(height: 14),
               Text(
-                'You can change this later.',
+                'You can switch between being a rider or a driver\nanytime in settings.',
+                textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const Spacer(flex: 3),
@@ -529,15 +547,25 @@ class ProfileGateScreen extends ConsumerWidget {
     final user = ref.watch(authStateProvider).value;
     final profile = ref.watch(currentProfileProvider).value;
     final isComplete = profile?.isComplete == true;
+    final hasRole = profile?.primaryRole != null;
     return SideCarScaffold(
       showBack: true,
+      onBack: () => context.go(AppRoutes.onboarded),
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(
-          isComplete
+          isComplete && hasRole
+              ? () => context.go(AppRoutes.onboarded)
+              : isComplete
               ? () => context.go(AppRoutes.onboarded)
               : () => context.go(AppRoutes.profile),
         ),
-        child: Text(isComplete ? 'Done' : 'Finish profile'),
+        child: Text(
+          isComplete && hasRole
+              ? 'Change ride preference'
+              : isComplete
+              ? 'Choose ride preference'
+              : 'Finish profile',
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -558,14 +586,16 @@ class ProfileGateScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 10),
           _GateStep(
-            title: 'Name and graduation year',
+            title: 'Personal details',
             subtitle: profile == null
                 ? 'Required'
-                : '${profile.displayName} · ${profile.graduationYear}',
+                : '${profile.displayName} · ${profile.age} · ${profile.gender}',
             complete:
                 profile != null &&
                 profile.displayName.isNotEmpty &&
-                profile.graduationYear > 0,
+                profile.age >= 18 &&
+                profile.gender.isNotEmpty &&
+                profile.language.isNotEmpty,
           ),
           const SizedBox(height: 10),
           _GateStep(
@@ -582,6 +612,19 @@ class ProfileGateScreen extends ConsumerWidget {
                 : 'Ride actions stay locked until every required profile item is complete.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
+          if (isComplete) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: AppHaptics.wrap(() async {
+                  await ref.read(authRepositoryProvider).signOut();
+                  if (context.mounted) context.go(AppRoutes.welcome);
+                }),
+                child: const Text('Log out'),
+              ),
+            ),
+          ],
         ],
       ),
     );

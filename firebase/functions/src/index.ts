@@ -94,7 +94,7 @@ async function assertAllowedSchoolEmail(email: string): Promise<void> {
   if (!(await allowedDomains()).has(domain)) {
     throw new HttpsError(
       "permission-denied",
-      "Use an approved school email. SideCar is launching at UCSB first.",
+      "Students only — ucsb.edu email required",
     );
   }
 }
@@ -211,6 +211,9 @@ export const createStudentAccount = onCall(
         displayName: `${firstName} ${lastName}`,
         email,
         school: "UC Santa Barbara",
+        age: 0,
+        gender: "",
+        language: "",
         homeBase: "",
         major: "",
         graduationYear: 0,
@@ -269,6 +272,9 @@ export const completeGoogleStudentSignIn = onCall(
         displayName: `${firstName} ${lastName}`,
         email: user.email,
         school: "UC Santa Barbara",
+        age: 0,
+        gender: "",
+        language: "",
         homeBase: "",
         major: "",
         graduationYear: 0,
@@ -337,7 +343,10 @@ export const requestPasswordResetCode = onCall(
       const user = await auth.getUserByEmail(email);
       await sendOtp({email, purpose: "password_reset", uid: user.uid});
     } catch (error) {
-      if ((error as {code?: string}).code !== "auth/user-not-found") throw error;
+      if ((error as {code?: string}).code === "auth/user-not-found") {
+        throw new HttpsError("not-found", "No account was found for this email.");
+      }
+      throw error;
     }
     return {accepted: true};
   },

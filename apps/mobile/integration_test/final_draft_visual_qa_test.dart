@@ -109,6 +109,9 @@ class _QaAuthRepository implements AuthRepository {
   Stream<AccountUser?> authStateChanges() => Stream.value(user);
 
   @override
+  Future<AccountUser?> validateCurrentSession() async => user;
+
+  @override
   Future<void> completePasswordReset({
     required String email,
     required String resetToken,
@@ -157,9 +160,9 @@ class _QaProfileRepository implements ProfileRepository {
     firstName: 'Maya',
     lastName: 'Chen',
     school: 'UC Santa Barbara',
-    homeBase: 'San Mateo',
-    major: 'Economics',
-    graduationYear: 2028,
+    age: 20,
+    gender: 'Female',
+    language: 'English',
     photoUrl: 'visual-qa-photo',
   );
 

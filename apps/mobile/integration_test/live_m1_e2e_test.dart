@@ -53,7 +53,7 @@ void main() {
           rejection = error;
         }
         expect(rejection, isNotNull);
-        expect(rejection!.message, contains('approved school email'));
+        expect(rejection!.message, contains('ucsb.edu email required'));
       case 'reset-existing':
         expect(code, matches(RegExp(r'^\d{6}$')));
         expect(newPassword, isNotEmpty);
@@ -96,9 +96,9 @@ void main() {
           firstName: 'Shohruh',
           lastName: 'Alijonov',
           school: 'UC Santa Barbara',
-          homeBase: 'San Mateo',
-          major: 'Computer Science',
-          graduationYear: 2028,
+          age: 20,
+          gender: 'Male',
+          language: 'English',
           photoUrl: photoUrl,
         );
         await profiles.saveProfile(profile);
@@ -140,9 +140,13 @@ void main() {
             .collection('users')
             .doc(firebaseUser.uid)
             .delete();
-        await FirebaseStorage.instance
-            .ref('users/${firebaseUser.uid}/profile/profile.jpg')
-            .delete();
+        try {
+          await FirebaseStorage.instance
+              .ref('users/${firebaseUser.uid}/profile/profile.jpg')
+              .delete();
+        } on FirebaseException catch (error) {
+          if (error.code != 'object-not-found') rethrow;
+        }
         await firebaseUser.delete();
         expect(FirebaseAuth.instance.currentUser, isNull);
       case 'assert-deleted':
