@@ -85,10 +85,32 @@ firebase_storage_bucket=$(
   /usr/libexec/PlistBuddy -c "Print :STORAGE_BUCKET" "$firebase_plist"
 )
 
+build_number=$(
+  sed -n 's/^version:.*+\([0-9][0-9]*\)$/\1/p' pubspec.yaml
+)
+
+if [ -n "${CI_BUILD_NUMBER:-}" ]; then
+  case "$CI_BUILD_NUMBER" in
+    *[!0-9]*)
+      echo "CI_BUILD_NUMBER must be numeric." >&2
+      exit 1
+      ;;
+  esac
+  build_number=$((15 + CI_BUILD_NUMBER))
+fi
+
+if [ -z "$build_number" ]; then
+  echo "Unable to determine the iOS build number." >&2
+  exit 1
+fi
+
+echo "Configuring TestFlight build number $build_number."
+
 flutter build ios \
   --release \
   --config-only \
   --no-codesign \
+  --build-number="$build_number" \
   --dart-define="FIREBASE_API_KEY=$firebase_api_key" \
   --dart-define="FIREBASE_APP_ID=$firebase_app_id" \
   --dart-define="FIREBASE_MESSAGING_SENDER_ID=$firebase_sender_id" \
