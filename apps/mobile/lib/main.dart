@@ -5,6 +5,8 @@ import 'package:sidecar/src/core/config/business_config_repository.dart';
 import 'package:sidecar/src/core/firebase/app_bootstrap.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
+import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
+import 'package:sidecar/src/features/verification/domain/verification_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,6 +24,10 @@ Future<void> main() async {
         profileRepositoryProvider.overrideWithValue(
           bootstrap.profileRepository,
         ),
+        verificationRepositoryProvider.overrideWithValue(
+          bootstrap.verificationRepository,
+        ),
+        safetyRepositoryProvider.overrideWithValue(bootstrap.safetyRepository),
       ],
       child: const SideCarApp(),
     ),

@@ -41,6 +41,50 @@ service cloud.firestore {
         validProfile(request.resource.data) &&
         (!('primaryRole' in request.resource.data) ||
           request.resource.data.primaryRole in ['rider', 'driver']);
+
+      match /verifications/{verificationId} {
+        allow read: if owns(uid);
+        allow write: if false;
+      }
+
+      match /vehicles/{vehicleId} {
+        allow read: if owns(uid);
+        allow create, update: if owns(uid) && verifiedSchoolEmail() &&
+          vehicleId == 'primary' &&
+          request.resource.data.keys().hasOnly([
+            'year', 'make', 'model', 'color', 'licensePlate', 'photoUrl',
+            'complete', 'updatedAt'
+          ]) &&
+          request.resource.data.year is int &&
+          request.resource.data.year >= 1980 &&
+          request.resource.data.year <= 2100 &&
+          request.resource.data.make is string &&
+          request.resource.data.make.size() > 0 &&
+          request.resource.data.make.size() <= 40 &&
+          request.resource.data.model is string &&
+          request.resource.data.model.size() > 0 &&
+          request.resource.data.model.size() <= 40 &&
+          request.resource.data.color is string &&
+          request.resource.data.color.size() > 0 &&
+          request.resource.data.color.size() <= 40 &&
+          request.resource.data.licensePlate is string &&
+          request.resource.data.licensePlate.size() > 0 &&
+          request.resource.data.licensePlate.size() <= 20 &&
+          request.resource.data.photoUrl is string &&
+          request.resource.data.photoUrl.size() > 0 &&
+          request.resource.data.photoUrl.size() <= 2048 &&
+          request.resource.data.complete == true;
+        allow delete: if owns(uid);
+      }
+
+      match /blockedUsers/{blockedUid} {
+        allow read: if owns(uid);
+        allow write: if false;
+      }
+    }
+
+    match /safetyReports/{reportId} {
+      allow read, write: if false;
     }
 
     match /auth_otps/{document=**} {

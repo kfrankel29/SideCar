@@ -23,10 +23,10 @@ class ProfileSetupScreen extends ConsumerStatefulWidget {
 class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _age = TextEditingController();
+  final _language = TextEditingController();
   final _picker = ImagePicker();
   UserProfile? _existing;
   String _gender = 'Female';
-  String _language = 'English';
   Uint8List? _photoBytes;
   String _photoContentType = 'image/jpeg';
   bool _loading = true;
@@ -48,7 +48,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       _existing = profile;
       _age.text = profile?.age == 0 ? '' : profile!.age.toString();
       _gender = profile?.gender.isNotEmpty == true ? profile!.gender : 'Female';
-      _language = profile?.language.isNotEmpty == true
+      _language.text = profile?.language.isNotEmpty == true
           ? profile!.language
           : 'English';
     } on AppFailure catch (error) {
@@ -65,6 +65,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   @override
   void dispose() {
     _age.dispose();
+    _language.dispose();
     super.dispose();
   }
 
@@ -146,7 +147,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
             : 'UC Santa Barbara',
         age: int.parse(_age.text.trim()),
         gender: _gender,
-        language: _language,
+        language: _language.text.trim(),
         homeBase: _existing?.homeBase ?? '',
         major: _existing?.major ?? '',
         graduationYear: _existing?.graduationYear ?? 0,
@@ -155,7 +156,6 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       );
       await repository.saveProfile(profile);
       ref.invalidate(currentProfileProvider);
-      await ref.read(currentProfileProvider.future);
       if (mounted) context.go(AppRoutes.onboarded);
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
@@ -305,16 +305,20 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
             const SizedBox(height: 18),
             FormFieldBlock(
               label: 'Language',
-              child: DropdownButtonFormField<String>(
-                isExpanded: true,
-                initialValue: _language,
-                items: const [
-                  DropdownMenuItem(value: 'English', child: Text('English')),
-                  DropdownMenuItem(value: 'Spanish', child: Text('Spanish')),
-                  DropdownMenuItem(value: 'Other', child: Text('Other')),
-                ],
-                onChanged: (value) {
-                  if (value != null) setState(() => _language = value);
+              child: TextFormField(
+                controller: _language,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                inputFormatters: [LengthLimitingTextInputFormatter(80)],
+                decoration: const InputDecoration(hintText: 'English'),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Enter your language';
+                  }
+                  if (value.trim().length < 2) {
+                    return 'Enter a valid language';
+                  }
+                  return null;
                 },
               ),
             ),
@@ -468,7 +472,6 @@ class OnboardedScreen extends ConsumerWidget {
     try {
       await ref.read(profileRepositoryProvider).setPrimaryRole(role);
       ref.invalidate(currentProfileProvider);
-      await ref.read(currentProfileProvider.future);
       if (!context.mounted) return;
       context.go(AppRoutes.profileGate);
     } on AppFailure catch (error) {
@@ -570,7 +573,7 @@ class ProfileGateScreen extends ConsumerWidget {
       bottom: FilledButton(
         onPressed: AppHaptics.wrap(
           isComplete && hasRole
-              ? () => context.go(AppRoutes.onboarded)
+              ? () => context.go(AppRoutes.verification)
               : isComplete
               ? () => context.go(AppRoutes.onboarded)
               : () => context.go(AppRoutes.profile),

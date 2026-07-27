@@ -1,0 +1,22 @@
+export type StripeIdentitySessionReference = {
+  metadata?: Record<string, string> | null;
+  client_reference_id?: string | null;
+};
+
+export function stripeIdentityStatusForEvent(eventType: string): string {
+  if (eventType.endsWith(".verified")) return "verified";
+  if (eventType.endsWith(".requires_input")) return "requiresAction";
+  if (eventType.endsWith(".canceled")) return "failed";
+  if (eventType.endsWith(".redacted")) return "notStarted";
+  return "pending";
+}
+
+export function stripeIdentitySessionUid(
+  session: StripeIdentitySessionReference,
+): string | null {
+  const metadataUid = session.metadata?.uid?.trim();
+  if (metadataUid) return metadataUid;
+
+  const clientReferenceId = session.client_reference_id?.trim();
+  return clientReferenceId || null;
+}

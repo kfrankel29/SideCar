@@ -272,7 +272,7 @@ class UnavailableAuthRepository implements AuthRepository {
 
   Never _notReady() {
     throw const AppFailure(
-      'Firebase is not configured for this build yet.',
+      'We can’t connect right now. Install the latest build and try again.',
       code: 'firebase-not-configured',
     );
   }

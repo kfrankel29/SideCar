@@ -14,6 +14,10 @@ import 'package:sidecar/src/features/auth/data/firebase_auth_repository.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/data/firebase_profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
+import 'package:sidecar/src/features/safety/data/firebase_safety_repository.dart';
+import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
+import 'package:sidecar/src/features/verification/data/firebase_verification_repository.dart';
+import 'package:sidecar/src/features/verification/domain/verification_repository.dart';
 
 class AppBootstrapResult {
   const AppBootstrapResult({
@@ -21,6 +25,8 @@ class AppBootstrapResult {
     required this.businessConfigRepository,
     required this.authRepository,
     required this.profileRepository,
+    required this.verificationRepository,
+    required this.safetyRepository,
     this.initializationError,
   });
 
@@ -28,6 +34,8 @@ class AppBootstrapResult {
   final BusinessConfigRepository businessConfigRepository;
   final AuthRepository authRepository;
   final ProfileRepository profileRepository;
+  final VerificationRepository verificationRepository;
+  final SafetyRepository safetyRepository;
   final Object? initializationError;
 }
 
@@ -77,6 +85,13 @@ class AppBootstrap {
           FirebaseFirestore.instance,
           FirebaseStorage.instance,
         ),
+        verificationRepository: FirebaseVerificationRepository(
+          auth,
+          FirebaseFirestore.instance,
+          FirebaseStorage.instance,
+          functions,
+        ),
+        safetyRepository: FirebaseSafetyRepository(functions),
         initializationError: appCheckError,
       );
     } catch (error) {
@@ -88,6 +103,8 @@ class AppBootstrap {
         ),
         authRepository: const UnavailableAuthRepository(),
         profileRepository: const UnavailableProfileRepository(),
+        verificationRepository: const UnavailableVerificationRepository(),
+        safetyRepository: const UnavailableSafetyRepository(),
       );
     }
   }

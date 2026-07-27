@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/features/auth/presentation/auth_screens.dart';
 import 'package:sidecar/src/features/diagnostics/presentation/config_diagnostics_screen.dart';
 import 'package:sidecar/src/features/profile/presentation/profile_screens.dart';
+import 'package:sidecar/src/features/safety/presentation/safety_screens.dart';
+import 'package:sidecar/src/features/verification/presentation/verification_screens.dart';
 
 abstract final class AppRoutes {
   static const opening = '/opening';
@@ -21,6 +23,16 @@ abstract final class AppRoutes {
   static const photoPermission = '/photo-permission';
   static const onboarded = '/onboarded';
   static const profileGate = '/profile-gate';
+  static const verification = '/verification';
+  static const identityVerification = '/verification/identity';
+  static const driverLicense = '/verification/driver-license';
+  static const vehicleProfile = '/verification/vehicle';
+  static const insuranceVerification = '/verification/insurance';
+  static const insuranceFallback = '/verification/insurance/manual';
+  static const verificationComplete = '/verification/complete';
+  static const safetyTools = '/safety';
+  static const blockUser = '/safety/block';
+  static const reportUser = '/safety/report';
   static const diagnostics = '/diagnostics/config';
 
   static String get initialLocation {
@@ -93,6 +105,52 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.profileGate,
         builder: (_, _) => const ProfileGateScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.verification,
+        builder: (_, _) => const VerificationHubScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.identityVerification,
+        builder: (_, _) => const IdentityVerificationScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.driverLicense,
+        builder: (_, _) => const DriverLicenseUploadScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.vehicleProfile,
+        builder: (_, _) => const VehicleProfileScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.insuranceVerification,
+        builder: (_, _) => const InsuranceVerificationScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.insuranceFallback,
+        builder: (_, _) => const InsuranceFallbackScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.verificationComplete,
+        builder: (_, _) => const VerificationCompleteScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.safetyTools,
+        builder: (_, _) => const SafetyToolsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.blockUser,
+        builder: (_, state) => BlockUserScreen(
+          targetUserId: state.uri.queryParameters['uid'] ?? '',
+          name: state.uri.queryParameters['name'] ?? 'User',
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.reportUser,
+        builder: (_, state) => ReportUserScreen(
+          targetUserId: state.uri.queryParameters['uid'] ?? '',
+          name: state.uri.queryParameters['name'] ?? 'User',
+        ),
       ),
       GoRoute(
         path: AppRoutes.diagnostics,

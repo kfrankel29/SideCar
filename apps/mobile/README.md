@@ -1,8 +1,9 @@
 # SideCar mobile
 
-Flutter client for iOS and Android. The implemented scope is Milestone 1 only:
-Final Draft account flows, school-email verification, password reset, required
-profile completion, profile gating, and live Firebase Remote Config.
+Flutter client for iOS and Android. The implemented scope covers the approved
+Milestones 1 and 2: Final Draft account and profile flows, backend-controlled
+configuration, identity and driver verification, vehicle details, role-aware
+verification gating, insurance verification/fallback, and user safety actions.
 
 ## Structure
 

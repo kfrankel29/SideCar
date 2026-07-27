@@ -14,6 +14,7 @@ class FirebaseProfileRepository implements ProfileRepository {
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
   final FirebaseStorage _storage;
+  static const _operationTimeout = Duration(seconds: 20);
 
   @override
   Stream<UserProfile?> watchCurrentProfile() {
@@ -34,7 +35,13 @@ class FirebaseProfileRepository implements ProfileRepository {
     final snapshot = await _firestore
         .collection('users')
         .doc(user.uid)
-        .get(const GetOptions(source: Source.server));
+        .get(const GetOptions(source: Source.server))
+        .timeout(
+          _operationTimeout,
+          onTimeout: () => throw const AppFailure(
+            'Your profile took too long to load. Check your connection and try again.',
+          ),
+        );
     final data = snapshot.data();
     return data == null ? null : UserProfile.fromJson(snapshot.id, data);
   }
@@ -50,14 +57,26 @@ class FirebaseProfileRepository implements ProfileRepository {
       throw const AppFailure('Choose a valid photo.');
     }
     final reference = _storage.ref('users/${user.uid}/profile/profile.jpg');
-    await reference.putData(
-      bytes,
-      SettableMetadata(
-        contentType: contentType,
-        cacheControl: 'private,max-age=3600',
+    await reference
+        .putData(
+          bytes,
+          SettableMetadata(
+            contentType: contentType,
+            cacheControl: 'private,max-age=3600',
+          ),
+        )
+        .timeout(
+          _operationTimeout,
+          onTimeout: () => throw const AppFailure(
+            'Your photo took too long to upload. Check your connection and try again.',
+          ),
+        );
+    return reference.getDownloadURL().timeout(
+      _operationTimeout,
+      onTimeout: () => throw const AppFailure(
+        'We uploaded your photo but could not finish saving it. Try again.',
       ),
     );
-    return reference.getDownloadURL();
   }
 
   @override
@@ -66,21 +85,39 @@ class FirebaseProfileRepository implements ProfileRepository {
     if (user == null || user.uid != profile.userId) {
       throw const AppFailure('Please sign in again.');
     }
-    await _firestore.collection('users').doc(user.uid).set({
-      ...profile.toJson(),
-      'email': user.email,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    await _firestore
+        .collection('users')
+        .doc(user.uid)
+        .set({
+          ...profile.toJson(),
+          'email': user.email,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true))
+        .timeout(
+          _operationTimeout,
+          onTimeout: () => throw const AppFailure(
+            'Your profile took too long to save. Check your connection and try again.',
+          ),
+        );
   }
 
   @override
   Future<void> setPrimaryRole(PrimaryRole role) async {
     final user = _auth.currentUser;
     if (user == null) throw const AppFailure('Please sign in again.');
-    await _firestore.collection('users').doc(user.uid).set({
-      'primaryRole': role.name,
-      'updatedAt': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    await _firestore
+        .collection('users')
+        .doc(user.uid)
+        .set({
+          'primaryRole': role.name,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true))
+        .timeout(
+          _operationTimeout,
+          onTimeout: () => throw const AppFailure(
+            'Your preference took too long to save. Check your connection and try again.',
+          ),
+        );
   }
 }
 
@@ -89,7 +126,7 @@ class UnavailableProfileRepository implements ProfileRepository {
 
   Never _notReady() {
     throw const AppFailure(
-      'Firebase is not configured for this build yet.',
+      'We can’t connect right now. Install the latest build and try again.',
       code: 'firebase-not-configured',
     );
   }

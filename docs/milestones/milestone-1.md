@@ -1,7 +1,7 @@
 # Milestone 1 — Designs, Foundation, Accounts, and Remote Config
 
-Status: **active**  
-Target: **July 24, 2026**  
+Status: **approved**
+Target: **July 24, 2026**
 Design gap list target: **July 18, 2026**
 
 ## Design deliverables

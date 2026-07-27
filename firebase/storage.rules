@@ -6,13 +6,34 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function owns(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function verifiedSchoolEmail() {
+      return request.auth.token.email_verified == true ||
+        request.auth.token.schoolEmailVerified == true;
+    }
+
     match /users/{uid}/profile/{fileName} {
-      allow read: if signedIn() && request.auth.uid == uid;
-      allow delete: if signedIn() && request.auth.uid == uid;
-      allow create, update: if signedIn() && request.auth.uid == uid &&
-        request.auth.token.email_verified == true &&
+      allow read: if owns(uid);
+      allow delete: if owns(uid);
+      allow create, update: if owns(uid) && verifiedSchoolEmail() &&
         request.resource.size < 5 * 1024 * 1024 &&
         request.resource.contentType.matches('image/.*');
+    }
+
+    match /users/{uid}/verification/vehicle/{fileName} {
+      allow read: if owns(uid);
+      allow delete: if owns(uid);
+      allow create, update: if owns(uid) && verifiedSchoolEmail() &&
+        request.resource.size < 8 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
+
+    match /users/{uid}/verification/insurance/{fileName} {
+      allow read: if owns(uid);
+      allow write: if false;
     }
 
     match /{allPaths=**} {

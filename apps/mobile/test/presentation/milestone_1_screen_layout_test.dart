@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/core/config/business_config_repository.dart';
 import 'package:sidecar/src/features/auth/data/firebase_auth_repository.dart';
 import 'package:sidecar/src/features/auth/domain/account_user.dart';
@@ -12,6 +13,7 @@ import 'package:sidecar/src/features/profile/data/firebase_profile_repository.da
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/profile/presentation/profile_screens.dart';
+import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 void main() {
@@ -137,11 +139,53 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextFormField), '20');
+    await tester.enterText(find.byType(TextFormField).first, '20');
+    await tester.enterText(find.byType(TextFormField).last, 'English');
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pump();
 
     expect(find.text('Add a profile photo to continue.'), findsOneWidget);
+  });
+
+  testWidgets('typed language saves and profile setup completes', (
+    tester,
+  ) async {
+    final repository = _MemoryProfileRepository(
+      profile: _MemoryProfileRepository.completeProfile,
+    );
+    final router = GoRouter(
+      initialLocation: '/profile',
+      routes: [
+        GoRoute(
+          path: '/profile',
+          builder: (_, _) => const ProfileSetupScreen(),
+        ),
+        GoRoute(
+          path: AppRoutes.onboarded,
+          builder: (_, _) => const Scaffold(body: Text('Profile saved')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(const _SignedInAuth()),
+          profileRepositoryProvider.overrideWithValue(repository),
+        ],
+        child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextFormField).last, 'Uzbek');
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(repository.profile?.language, 'Uzbek');
+    expect(find.text('Profile saved'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
   testWidgets('role selection matches the Final Draft copy', (tester) async {

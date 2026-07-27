@@ -3,14 +3,26 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {getRemoteConfig} from "firebase-admin/remote-config";
+import {getStorage} from "firebase-admin/storage";
 import {defineSecret} from "firebase-functions/params";
-import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {HttpsError, onCall, onRequest} from "firebase-functions/v2/https";
+import Stripe from "stripe";
+import {parseManualInsuranceDocument} from "./manual_insurance.js";
+import {
+  stripeIdentitySessionUid,
+  stripeIdentityStatusForEvent,
+} from "./stripe_identity.js";
 
 if (getApps().length === 0) initializeApp();
 
 const db = getFirestore();
 const auth = getAuth();
 const otpHashSecret = defineSecret("OTP_HASH_SECRET");
+const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
+const stripeIdentityVerificationFlowId = defineSecret(
+  "STRIPE_IDENTITY_VERIFICATION_FLOW_ID",
+);
+const stripeIdentityWebhookSecret = defineSecret("STRIPE_IDENTITY_WEBHOOK_SECRET");
 const region = "us-central1";
 const otpLifetimeMinutes = 10;
 const resetSessionMinutes = 10;
@@ -404,5 +416,307 @@ export const completePasswordReset = onCall(
     await auth.updateUser(uid, {password: newPassword});
     await auth.revokeRefreshTokens(uid);
     return {updated: true};
+  },
+);
+
+export const createIdentityVerificationSession = onCall(
+  {
+    region,
+    enforceAppCheck: true,
+    secrets: [stripeSecretKey, stripeIdentityVerificationFlowId],
+    maxInstances: 30,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
+    }
+    const user = await auth.getUser(request.auth.uid);
+    if (!user.email || (!user.emailVerified &&
+        request.auth.token.schoolEmailVerified !== true)) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Verify your school email before continuing.",
+      );
+    }
+    await assertAllowedSchoolEmail(user.email);
+
+    const stripe = new Stripe(stripeSecretKey.value());
+    const statusReference = db.collection("users").doc(user.uid)
+      .collection("verifications").doc("current");
+    const existingSessionId =
+      (await statusReference.get()).data()?.stripeVerificationSessionId;
+    if (typeof existingSessionId === "string" && existingSessionId.length > 0) {
+      try {
+        const existing = await stripe.identity.verificationSessions.retrieve(
+          existingSessionId,
+        );
+        if (existing.status === "verified") {
+          throw new HttpsError(
+            "failed-precondition",
+            "Your identity is already verified.",
+          );
+        }
+        if (existing.url) {
+          return {url: existing.url};
+        }
+      } catch (error) {
+        if (error instanceof HttpsError) {
+          throw error;
+        }
+        if (!(error instanceof Stripe.errors.StripeInvalidRequestError) ||
+            error.code !== "resource_missing") {
+          throw new HttpsError(
+            "unavailable",
+            "Stripe verification is temporarily unavailable. Try again.",
+          );
+        }
+      }
+    }
+
+    let session: Stripe.Identity.VerificationSession;
+    try {
+      session = await stripe.identity.verificationSessions.create({
+        verification_flow: stripeIdentityVerificationFlowId.value(),
+        client_reference_id: user.uid,
+        provided_details: {email: user.email},
+        metadata: {uid: user.uid},
+      });
+    } catch {
+      throw new HttpsError(
+        "unavailable",
+        "Stripe verification is temporarily unavailable. Try again.",
+      );
+    }
+    if (!session.url) {
+      throw new HttpsError(
+        "internal",
+        "Stripe did not return a verification link.",
+      );
+    }
+
+    await statusReference.set({
+        identityStatus: "pending",
+        stripeVerificationSessionId: session.id,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    return {url: session.url};
+  },
+);
+
+export const stripeIdentityWebhook = onRequest(
+  {
+    region,
+    secrets: [stripeSecretKey, stripeIdentityWebhookSecret],
+    maxInstances: 30,
+  },
+  async (request, response) => {
+    if (request.method !== "POST") {
+      response.status(405).send("Method not allowed");
+      return;
+    }
+    const signature = request.headers["stripe-signature"];
+    if (typeof signature !== "string") {
+      response.status(400).send("Missing Stripe signature");
+      return;
+    }
+
+    let event: Stripe.Event;
+    try {
+      const stripe = new Stripe(stripeSecretKey.value());
+      event = stripe.webhooks.constructEvent(
+        request.rawBody,
+        signature,
+        stripeIdentityWebhookSecret.value(),
+      );
+    } catch {
+      response.status(400).send("Invalid Stripe signature");
+      return;
+    }
+
+    if (!event.type.startsWith("identity.verification_session.")) {
+      response.status(200).send("Ignored");
+      return;
+    }
+    const session = event.data.object as Stripe.Identity.VerificationSession;
+    const uid = stripeIdentitySessionUid(session);
+    if (!uid) {
+      response.status(200).send("Ignored");
+      return;
+    }
+    const identityStatus = stripeIdentityStatusForEvent(event.type);
+    await db.collection("users").doc(uid)
+      .collection("verifications").doc("current").set({
+        identityStatus,
+        stripeVerificationSessionId: session.id,
+        lastError: session.last_error?.reason ?? "",
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    response.status(200).send("Received");
+  },
+);
+
+export const submitManualInsuranceDocument = onCall(
+  {
+    region,
+    enforceAppCheck: true,
+    maxInstances: 20,
+    timeoutSeconds: 60,
+    memory: "512MiB",
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
+    }
+
+    let document;
+    try {
+      const data = request.data as Record<string, unknown>;
+      document = parseManualInsuranceDocument(
+        data.encodedBytes,
+        data.contentType,
+      );
+    } catch (error) {
+      const code = (error as Error).message;
+      if (code === "document-too-large") {
+        throw new HttpsError(
+          "invalid-argument",
+          "Upload an insurance document smaller than 10 MB.",
+        );
+      }
+      if (code === "unsupported-content-type") {
+        throw new HttpsError(
+          "invalid-argument",
+          "Upload a JPG, PNG, or PDF insurance document.",
+        );
+      }
+      throw new HttpsError(
+        "invalid-argument",
+        "Choose a valid insurance document.",
+      );
+    }
+
+    const uid = request.auth.uid;
+    const statusReference = db.collection("users").doc(uid)
+      .collection("verifications").doc("current");
+    const statusSnapshot = await statusReference.get();
+    const currentStatus = statusSnapshot.data()?.insuranceStatus;
+    if (currentStatus !== "requiresAction" && currentStatus !== "failed") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Manual upload is available only when automatic insurance verification cannot be completed.",
+      );
+    }
+
+    const objectPath =
+      `users/${uid}/verification/insurance/current-document.${document.extension}`;
+    const file = getStorage().bucket().file(objectPath);
+
+    try {
+      await file.save(document.bytes, {
+        resumable: false,
+        validation: "md5",
+        metadata: {
+          contentType: document.contentType,
+          cacheControl: "private,no-store",
+          metadata: {
+            ownerUid: uid,
+            purpose: "manual-insurance-review",
+          },
+        },
+      });
+
+      await db.runTransaction(async (transaction) => {
+        const latest = await transaction.get(statusReference);
+        const latestStatus = latest.data()?.insuranceStatus;
+        if (latestStatus !== "requiresAction" && latestStatus !== "failed") {
+          throw new HttpsError(
+            "failed-precondition",
+            "Automatic insurance verification no longer needs a manual document.",
+          );
+        }
+        transaction.set(statusReference, {
+          insuranceStatus: "pending",
+          manualInsuranceSubmitted: true,
+          insuranceDocumentPath: objectPath,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true});
+      });
+    } catch (error) {
+      await file.delete({ignoreNotFound: true}).catch(() => undefined);
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError(
+        "internal",
+        "We could not submit your insurance document. Try again.",
+      );
+    }
+
+    return {submitted: true};
+  },
+);
+
+function targetUid(value: unknown, currentUid: string): string {
+  const uid = text(value, "Target user", 128);
+  if (uid === currentUid) {
+    throw new HttpsError("invalid-argument", "You cannot select your own account.");
+  }
+  return uid;
+}
+
+export const blockUser = onCall(
+  {region, enforceAppCheck: true, maxInstances: 30},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
+    }
+    const data = request.data as Record<string, unknown>;
+    const blockedUid = targetUid(data.targetUserId, request.auth.uid);
+    const blockedUser = await auth.getUser(blockedUid).catch(() => null);
+    if (!blockedUser) {
+      throw new HttpsError("not-found", "That account could not be found.");
+    }
+    await db.collection("users").doc(request.auth.uid)
+      .collection("blockedUsers").doc(blockedUid).set({
+        blockedUserId: blockedUid,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    return {blocked: true};
+  },
+);
+
+const reportReasons = new Set([
+  "unsafeBehavior",
+  "inappropriateMessages",
+  "profileOrIdentity",
+  "paymentOrRide",
+]);
+
+export const reportUser = onCall(
+  {region, enforceAppCheck: true, maxInstances: 30},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
+    }
+    const data = request.data as Record<string, unknown>;
+    const reportedUid = targetUid(data.targetUserId, request.auth.uid);
+    const reason = text(data.reason, "Reason", 80);
+    if (!reportReasons.has(reason)) {
+      throw new HttpsError("invalid-argument", "Choose a valid report reason.");
+    }
+    const details = typeof data.details === "string" ?
+      data.details.trim().slice(0, 1000) :
+      "";
+    const reportedUser = await auth.getUser(reportedUid).catch(() => null);
+    if (!reportedUser) {
+      throw new HttpsError("not-found", "That account could not be found.");
+    }
+    await db.collection("safetyReports").add({
+      reporterUid: request.auth.uid,
+      reportedUid,
+      reason,
+      details,
+      status: "open",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return {reported: true};
   },
 );
