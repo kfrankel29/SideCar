@@ -96,21 +96,34 @@ class ScreenIntro extends StatelessWidget {
     required this.title,
     required this.description,
     super.key,
+    this.centerTitle = false,
   });
 
   final String title;
   final String description;
+  final bool centerTitle;
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          centerTitle ? CrossAxisAlignment.center : CrossAxisAlignment.start,
       children: [
         if (_SideCarHeaderScope.of(context).showBack)
           const SizedBox(height: 46),
-        Text(title, style: Theme.of(context).textTheme.headlineLarge),
-        const SizedBox(height: 9),
-        Text(description, style: Theme.of(context).textTheme.bodyMedium),
+        Text(
+          title,
+          style: Theme.of(context).textTheme.headlineLarge,
+          textAlign: centerTitle ? TextAlign.center : TextAlign.start,
+        ),
+        if (description.isNotEmpty) ...[
+          const SizedBox(height: 9),
+          Text(
+            description,
+            style: Theme.of(context).textTheme.bodyMedium,
+            textAlign: centerTitle ? TextAlign.center : TextAlign.start,
+          ),
+        ],
       ],
     );
   }
@@ -174,7 +187,7 @@ class SideCarInfoCard extends StatelessWidget {
 
   final String title;
   final String message;
-  final IconData icon;
+  final IconData? icon;
   final Color color;
 
   @override
@@ -189,8 +202,10 @@ class SideCarInfoCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 23, color: AppColors.ink),
-            const SizedBox(width: 12),
+            if (icon != null) ...[
+              Icon(icon!, size: 23, color: AppColors.ink),
+              const SizedBox(width: 12),
+            ],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

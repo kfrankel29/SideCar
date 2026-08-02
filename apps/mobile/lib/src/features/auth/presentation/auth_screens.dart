@@ -116,7 +116,7 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    'Call it. Ride it.',
+                      'The easy way home.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -128,7 +128,7 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
               bottom: 30,
               child: Center(
                 child: SizedBox(
-                  width: 36,
+                    width: 120,
                   child: LinearProgressIndicator(
                     minHeight: 2,
                     backgroundColor: Color(0xFFE4E4E4),
@@ -167,7 +167,7 @@ class WelcomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 109),
               Text(
-                'Never ride the 101 alone',
+                  'For students. By students.',
                 style: Theme.of(context).textTheme.labelLarge,
               ),
               const SizedBox(height: 8),
@@ -490,7 +490,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
             ),
             const SizedBox(height: 18),
             FormFieldBlock(
-              label: 'School email',
+              label: 'Student email',
               child: TextFormField(
                 controller: _email,
                 keyboardType: TextInputType.emailAddress,
@@ -798,11 +798,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             const ScreenIntro(
               title: 'Reset your password',
               description:
-                  "Enter your approved school email and we'll send a six-digit code.",
+                  "Enter your student email and we'll send a six-digit code.",
             ),
             const SizedBox(height: 28),
             FormFieldBlock(
-              label: 'School email',
+              label: 'Student email',
               child: TextFormField(
                 controller: _email,
                 keyboardType: TextInputType.emailAddress,
@@ -819,9 +819,10 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             ),
             const SizedBox(height: 18),
             const SideCarInfoCard(
-              title: 'School account protection',
+              title: 'Student account protection',
               message:
-                  'Reset codes expire after ten minutes and can be used once.',
+                  'Reset codes expire after 10 minutes and can be used once.',
+              icon: null,
             ),
             SideCarErrorText(_error),
           ],
@@ -1014,6 +1015,7 @@ class _NewPasswordScreenState extends ConsumerState<NewPasswordScreen> {
             const ScreenIntro(
               title: 'Create a new password',
               description: 'Use at least eight characters with one number.',
+              centerTitle: true,
             ),
             const SizedBox(height: 28),
             FormFieldBlock(
@@ -1045,8 +1047,9 @@ class _NewPasswordScreenState extends ConsumerState<NewPasswordScreen> {
             const SizedBox(height: 16),
             const SideCarInfoCard(
               title: 'Secure password',
-              message: 'Your previous password will stop working immediately.',
+              message: 'Your previous password stops working immediately.',
               color: AppColors.success,
+              icon: null,
             ),
             SideCarErrorText(_error),
           ],
@@ -1071,7 +1074,11 @@ class PasswordResetCompleteScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const ScreenIntro(title: 'Password reset', description: ''),
+          const ScreenIntro(
+            title: 'Password reset',
+            description: '',
+            centerTitle: true,
+          ),
           const SizedBox(height: 20),
           const SideCarInfoCard(
             title: 'Password updated',
