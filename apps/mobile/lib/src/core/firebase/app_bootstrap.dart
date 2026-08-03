@@ -14,6 +14,8 @@ import 'package:sidecar/src/features/auth/data/firebase_auth_repository.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/data/firebase_profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
+import 'package:sidecar/src/features/rides/data/firebase_ride_repository.dart';
+import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/safety/data/firebase_safety_repository.dart';
 import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
 import 'package:sidecar/src/features/verification/data/firebase_verification_repository.dart';
@@ -25,6 +27,7 @@ class AppBootstrapResult {
     required this.businessConfigRepository,
     required this.authRepository,
     required this.profileRepository,
+    required this.rideRepository,
     required this.verificationRepository,
     required this.safetyRepository,
     this.initializationError,
@@ -34,6 +37,7 @@ class AppBootstrapResult {
   final BusinessConfigRepository businessConfigRepository;
   final AuthRepository authRepository;
   final ProfileRepository profileRepository;
+  final RideRepository rideRepository;
   final VerificationRepository verificationRepository;
   final SafetyRepository safetyRepository;
   final Object? initializationError;
@@ -91,6 +95,7 @@ class AppBootstrap {
           FirebaseStorage.instance,
           functions,
         ),
+        rideRepository: FirebaseRideRepository(functions),
         safetyRepository: FirebaseSafetyRepository(functions),
         initializationError: appCheckError,
       );
@@ -103,6 +108,7 @@ class AppBootstrap {
         ),
         authRepository: const UnavailableAuthRepository(),
         profileRepository: const UnavailableProfileRepository(),
+        rideRepository: const UnavailableRideRepository(),
         verificationRepository: const UnavailableVerificationRepository(),
         safetyRepository: const UnavailableSafetyRepository(),
       );

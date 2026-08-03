@@ -48,7 +48,7 @@ void main() {
 
     expect(auth.validationCount, 1);
     expect(find.text('Create account'), findsOneWidget);
-    expect(find.text('Never ride the 101 alone'), findsOneWidget);
+    expect(find.text('For students. By students.'), findsOneWidget);
   });
 
   testWidgets('a missing server profile signs out a restored auth session', (

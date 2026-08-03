@@ -2,7 +2,7 @@
   "conditions": [],
   "parameters": {
     "config_version": {
-      "defaultValue": {"value": "m1-initial"},
+      "defaultValue": {"value": "m3-rides"},
       "description": "Visible version marker used for acceptance testing.",
       "valueType": "STRING"
     },
@@ -37,6 +37,30 @@
       "defaultValue": {"value": "driver_sets_under_cap"},
       "description": "driver_sets_under_cap or platform_calculated.",
       "valueType": "STRING"
+    },
+    "ride_share_base_url": {
+      "defaultValue": {
+        "value": "https://sidecar-fb0e7.web.app/ride"
+      },
+      "description": "Public browser URL used for externally shareable ride links.",
+      "valueType": "STRING"
+    },
+    "max_route_detour_miles": {
+      "defaultValue": {"value": "1"},
+      "description": "Maximum pickup or drop-off distance from the driver's encoded route, in miles.",
+      "valueType": "NUMBER"
+    },
+    "recurring_ride_occurrences": {
+      "defaultValue": {"value": "8"},
+      "description": "Number of weekly ride occurrences created when a driver enables repeat weekly.",
+      "valueType": "NUMBER"
+    },
+    "pickup_dropoff_boundary_geojson": {
+      "defaultValue": {
+        "value": "{\"type\":\"Polygon\",\"coordinates\":[[[-119.8767135,34.4091842],[-119.8442695,34.4047937],[-119.8389176,34.4159824],[-119.853895,34.4232043],[-119.8742798,34.4229919],[-119.8767135,34.4091842]]] }"
+      },
+      "description": "GeoJSON polygon exported from the client-approved Google My Maps pickup/drop-off boundary.",
+      "valueType": "JSON"
     },
     "refund_rules_json": {
       "defaultValue": {

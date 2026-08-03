@@ -6,6 +6,11 @@ import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/features/auth/presentation/auth_screens.dart';
 import 'package:sidecar/src/features/diagnostics/presentation/config_diagnostics_screen.dart';
 import 'package:sidecar/src/features/profile/presentation/profile_screens.dart';
+import 'package:sidecar/src/features/rides/domain/ride_models.dart';
+import 'package:sidecar/src/features/rides/presentation/driver_ride_screens.dart';
+import 'package:sidecar/src/features/rides/presentation/ride_details_screen.dart';
+import 'package:sidecar/src/features/rides/presentation/ride_home_screen.dart';
+import 'package:sidecar/src/features/rides/presentation/ride_search_screens.dart';
 import 'package:sidecar/src/features/safety/presentation/safety_screens.dart';
 import 'package:sidecar/src/features/verification/presentation/verification_screens.dart';
 
@@ -34,6 +39,12 @@ abstract final class AppRoutes {
   static const blockUser = '/safety/block';
   static const reportUser = '/safety/report';
   static const diagnostics = '/diagnostics/config';
+  static const home = '/home';
+  static const searchRides = '/rides/search';
+  static const searchResults = '/rides/results';
+  static const rideDetails = '/rides/:rideId';
+  static const postRide = '/rides/post';
+  static const myRides = '/rides/mine';
 
   static String get initialLocation {
     const buildRoute = String.fromEnvironment('SIDECAR_INITIAL_ROUTE');
@@ -155,6 +166,39 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.diagnostics,
         builder: (_, _) => const ConfigDiagnosticsScreen(),
+      ),
+      GoRoute(path: AppRoutes.home, builder: (_, _) => const RideHomeScreen()),
+      GoRoute(
+        path: AppRoutes.searchRides,
+        builder: (_, _) => const SearchRidesScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.searchResults,
+        builder: (_, state) => SearchResultsScreen(
+          criteria:
+              state.extra as RideSearchCriteria? ??
+              RideSearchCriteria(
+                originQuery: 'UCSB / Isla Vista',
+                destinationQuery: 'San Mateo / Peninsula',
+                pickupPlaceId: '',
+                dropoffPlaceId: '',
+                startAt: DateTime.now(),
+                endAt: DateTime.now().add(const Duration(days: 1)),
+              ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.rideDetails,
+        builder: (_, state) =>
+            RideDetailsScreen(rideId: state.pathParameters['rideId'] ?? ''),
+      ),
+      GoRoute(
+        path: AppRoutes.postRide,
+        builder: (_, _) => const PostRideScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.myRides,
+        builder: (_, _) => const MyRidesScreen(),
       ),
     ],
   );

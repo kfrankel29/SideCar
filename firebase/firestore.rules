@@ -87,6 +87,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /rides/{rideId} {
+      allow read, write: if false;
+    }
+
     match /auth_otps/{document=**} {
       allow read, write: if false;
     }

@@ -979,8 +979,8 @@ class VerificationCompleteScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       bottom: FilledButton(
-        onPressed: AppHaptics.wrap(() => context.go(AppRoutes.verification)),
-        child: const Text('View verification status'),
+        onPressed: AppHaptics.wrap(() => context.go(AppRoutes.home)),
+        child: const Text('Continue to SideCar'),
       ),
       fillViewport: true,
       child: Column(

@@ -17,6 +17,19 @@
   "remoteconfig": {
     "template": "firebase/remoteconfig.template.json"
   },
+  "hosting": {
+    "public": "firebase/hosting",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/ride",
+        "function": {
+          "functionId": "rideSharePage",
+          "region": "us-central1"
+        }
+      }
+    ]
+  },
   "emulators": {
     "auth": {"port": 9099},
     "functions": {"port": 5001},

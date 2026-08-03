@@ -13,6 +13,16 @@ import {
   stripeIdentityStatusForEvent,
 } from "./stripe_identity.js";
 
+export {
+  createRide,
+  getRide,
+  listLeavingSoon,
+  listMyRides,
+  rideSharePage,
+  searchPlaces,
+  searchRides,
+} from "./rides.js";
+
 if (getApps().length === 0) initializeApp();
 
 const db = getFirestore();

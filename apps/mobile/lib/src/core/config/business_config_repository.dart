@@ -44,7 +44,7 @@ class FirebaseBusinessConfigRepository implements BusinessConfigRepository {
     RemoteConfigKeys.configVersion: 'local-default',
     RemoteConfigKeys.serviceFeeType: 'percentage',
     RemoteConfigKeys.serviceFeeValue: 10.0,
-    RemoteConfigKeys.irsMileageRate: 0.76,
+    RemoteConfigKeys.irsMileageRate: 0.0,
     RemoteConfigKeys.pricingMode: 'driver_sets_under_cap',
     RemoteConfigKeys.refundRules:
         '[{"minimumHoursBeforeTrip":168,"riderRefundPercentage":100,"platformPercentage":0,"driverPercentage":0},{"minimumHoursBeforeTrip":1,"riderRefundPercentage":50,"platformPercentage":10,"driverPercentage":40},{"minimumHoursBeforeTrip":0,"riderRefundPercentage":0,"platformPercentage":10,"driverPercentage":90}]',
@@ -186,7 +186,7 @@ BusinessConfig localDisplayConfig() {
   return BusinessConfig(
     serviceFeeType: ServiceFeeType.percentage,
     serviceFeeValue: 10,
-    irsMileageRate: 0.76,
+    irsMileageRate: 0,
     pricingMode: PricingMode.driverSetsUnderCap,
     paymentExpirationHours: 24,
     tripAutoCompleteHours: 48,
