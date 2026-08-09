@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  stripeIdentityExistingSessionOutcome,
   stripeIdentitySessionUid,
   stripeIdentityStatusForEvent,
 } from "./stripe_identity.js";
@@ -47,4 +48,25 @@ test("resolves the Firebase user from protected Stripe references", () => {
     "reference-user",
   );
   assert.equal(stripeIdentitySessionUid({metadata: {}}), null);
+});
+
+test("repairs verified sessions and resumes incomplete sessions", () => {
+  assert.deepEqual(
+    stripeIdentityExistingSessionOutcome({
+      status: "verified",
+      url: "https://verify.stripe.com/expired",
+    }),
+    {kind: "verified"},
+  );
+  assert.deepEqual(
+    stripeIdentityExistingSessionOutcome({
+      status: "requires_input",
+      url: "https://verify.stripe.com/resume",
+    }),
+    {kind: "resume", url: "https://verify.stripe.com/resume"},
+  );
+  assert.deepEqual(
+    stripeIdentityExistingSessionOutcome({status: "canceled", url: null}),
+    {kind: "create"},
+  );
 });

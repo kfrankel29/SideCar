@@ -97,14 +97,21 @@ void main() {
         ),
       );
       expect(ride.driverName, 'SideCar Driver');
+      expect(ride.driverPhotoUrl, profile.photoUrl);
+      expect(ride.driverPhotoUrl, isNotEmpty);
       expect(ride.status, 'published');
       expect(ride.pricePerSeatCents, 5000);
       expect(ride.maximumPriceCents, greaterThanOrEqualTo(5000));
       expect(ride.shareUrl, startsWith('https://sidecar-fb0e7.web.app/ride'));
+      expect(
+        ride.mapPreviewUrl,
+        startsWith('https://sidecar-fb0e7.web.app/ride-map'),
+      );
       expect(ride.encodedPolyline, isNotEmpty);
-      await _verifyPublishedRideIsImmutable(ride);
+      await _verifyHostedMapPreview(ride);
+      await _verifyPublishedRideIsImmutable(rides, ride);
 
-      final recurringRide = await rides.createRide(
+      final legacyRepeatRequest = await rides.createRide(
         RideDraft(
           origin: origin,
           destination: destination,
@@ -116,17 +123,16 @@ void main() {
           repeatWeekly: true,
         ),
       );
-      expect(recurringRide.repeatWeekly, isTrue);
-      expect(recurringRide.recurrenceId, recurringRide.id);
+      expect(legacyRepeatRequest.repeatWeekly, isFalse);
+      expect(legacyRepeatRequest.recurrenceId, isEmpty);
 
       final mine = await rides.listMyRides();
       expect(mine.map((item) => item.id), contains(ride.id));
       expect(
-        mine
-            .where((item) => item.recurrenceId == recurringRide.recurrenceId)
-            .length,
-        greaterThan(1),
+        mine.firstWhere((item) => item.id == ride.id).driverPhotoUrl,
+        profile.photoUrl,
       );
+      expect(mine.map((item) => item.id), contains(legacyRepeatRequest.id));
       expect((await rides.getRide(ride.id)).id, ride.id);
 
       await _mountScreen(
@@ -156,7 +162,8 @@ void main() {
         profileRepository: bootstrap.profileRepository,
       );
       expect(find.text('My rides'), findsOneWidget);
-      expect(find.text('Recurring'), findsOneWidget);
+      expect(find.text('Requests'), findsOneWidget);
+      expect(find.text('Recurring'), findsNothing);
       expect(find.text(ride.origin.displayName), findsWidgets);
       await binding.takeScreenshot('m3-live-driver-my-rides');
       await _holdForVisualQa('driver-my-rides', visualHoldSeconds);
@@ -176,6 +183,7 @@ void main() {
     final ride = matches.firstWhere(
       (item) => item.driverName == 'SideCar Driver',
     );
+    expect(ride.driverPhotoUrl, isNotEmpty);
     expect((await rides.getRide(ride.id)).id, ride.id);
     expect(
       (await rides.listLeavingSoon()).map((item) => item.id),
@@ -283,7 +291,29 @@ Future<void> _holdForVisualQa(String screen, int seconds) async {
   await Future<void>.delayed(Duration(seconds: seconds));
 }
 
-Future<void> _verifyPublishedRideIsImmutable(Ride ride) async {
+Future<void> _verifyPublishedRideIsImmutable(
+  RideRepository repository,
+  Ride ride,
+) async {
+  await expectLater(
+    repository.updateRide(
+      RideUpdate(
+        rideId: ride.id,
+        departureAt: ride.departureAt.add(const Duration(hours: 1)),
+        seats: ride.seatsTotal,
+        pricePerSeatCents: ride.pricePerSeatCents,
+        luggageAllowance: ride.luggageAllowance,
+        genderRestriction: ride.genderRestriction,
+      ),
+    ),
+    throwsA(
+      isA<AppFailure>().having(
+        (failure) => failure.message,
+        'message',
+        contains('cannot be edited'),
+      ),
+    ),
+  );
   final token = await FirebaseAuth.instance.currentUser?.getIdToken();
   expect(token, isNotNull);
   final client = HttpClient();
@@ -330,6 +360,23 @@ Future<void> _verifyHostedSharePage(Ride ride) async {
     expect(body, contains(ride.destination.displayName));
     expect(body, contains('${ride.priceLabel} per seat'));
     expect(body, contains('sidecar://app/rides/${ride.id}'));
+  } finally {
+    client.close(force: true);
+  }
+}
+
+Future<void> _verifyHostedMapPreview(Ride ride) async {
+  final client = HttpClient();
+  try {
+    final request = await client.getUrl(Uri.parse(ride.mapPreviewUrl));
+    final response = await request.close();
+    final bytes = await response.fold<int>(0, (total, data) {
+      return total + data.length;
+    });
+    expect(response.statusCode, HttpStatus.ok);
+    expect(response.headers.contentType?.mimeType, 'image/png');
+    expect(response.headers.value(HttpHeaders.cacheControlHeader), isNotNull);
+    expect(bytes, greaterThan(1000));
   } finally {
     client.close(force: true);
   }

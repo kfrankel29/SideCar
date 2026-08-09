@@ -10,6 +10,7 @@ import 'package:sidecar/src/core/widgets/sidecar_scaffold.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
+import 'package:sidecar/src/features/verification/domain/verification_repository.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
@@ -23,10 +24,10 @@ class ProfileSetupScreen extends ConsumerStatefulWidget {
 class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _age = TextEditingController();
-  final _language = TextEditingController();
   final _picker = ImagePicker();
   UserProfile? _existing;
   String _gender = 'Female';
+  String? _language;
   Uint8List? _photoBytes;
   String _photoContentType = 'image/jpeg';
   bool _loading = true;
@@ -48,9 +49,9 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       _existing = profile;
       _age.text = profile?.age == 0 ? '' : profile!.age.toString();
       _gender = profile?.gender.isNotEmpty == true ? profile!.gender : 'Female';
-      _language.text = profile?.language.isNotEmpty == true
+      _language = profile?.language.isNotEmpty == true
           ? profile!.language
-          : 'English';
+          : null;
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } on Object {
@@ -65,7 +66,6 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   @override
   void dispose() {
     _age.dispose();
-    _language.dispose();
     super.dispose();
   }
 
@@ -147,7 +147,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
             : 'UC Santa Barbara',
         age: int.parse(_age.text.trim()),
         gender: _gender,
-        language: _language.text.trim(),
+        language: _language!,
         homeBase: _existing?.homeBase ?? '',
         major: _existing?.major ?? '',
         graduationYear: _existing?.graduationYear ?? 0,
@@ -156,7 +156,16 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       );
       await repository.saveProfile(profile);
       ref.invalidate(currentProfileProvider);
-      if (mounted) context.go(AppRoutes.onboarded);
+      if (!mounted) return;
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go(
+          profile.primaryRole == null
+              ? AppRoutes.onboarded
+              : AppRoutes.verification,
+        );
+      }
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } on Object {
@@ -305,21 +314,23 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
             const SizedBox(height: 18),
             FormFieldBlock(
               label: 'Language',
-              child: TextFormField(
-                controller: _language,
-                textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.done,
-                inputFormatters: [LengthLimitingTextInputFormatter(80)],
-                decoration: const InputDecoration(hintText: 'English'),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Enter your language';
-                  }
-                  if (value.trim().length < 2) {
-                    return 'Enter a valid language';
-                  }
-                  return null;
-                },
+              child: DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: _language,
+                hint: const Text('Select spoken language'),
+                items: [
+                  for (final language in {
+                    ...supportedSpokenLanguages,
+                    ?_language,
+                  })
+                    DropdownMenuItem(value: language, child: Text(language)),
+                ],
+                onChanged: _saving
+                    ? null
+                    : (value) => setState(() => _language = value),
+                validator: (value) => value == null || value.isEmpty
+                    ? 'Select your spoken language'
+                    : null,
               ),
             ),
             SideCarErrorText(_error),
@@ -472,8 +483,15 @@ class OnboardedScreen extends ConsumerWidget {
     try {
       await ref.read(profileRepositoryProvider).setPrimaryRole(role);
       ref.invalidate(currentProfileProvider);
+      final verification = await ref
+          .read(verificationRepositoryProvider)
+          .loadCurrentVerification();
       if (!context.mounted) return;
-      context.go(AppRoutes.profileGate);
+      context.go(
+        verification.canUseRideFeatures(role)
+            ? AppRoutes.home
+            : AppRoutes.verification,
+      );
     } on AppFailure catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(

@@ -1,13 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/auth/presentation/auth_screens.dart';
 import 'package:sidecar/src/features/diagnostics/presentation/config_diagnostics_screen.dart';
+import 'package:sidecar/src/features/navigation/presentation/main_tab_shell.dart';
 import 'package:sidecar/src/features/profile/presentation/profile_screens.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
-import 'package:sidecar/src/features/rides/presentation/driver_ride_screens.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_details_screen.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_home_screen.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_search_screens.dart';
@@ -40,11 +42,16 @@ abstract final class AppRoutes {
   static const reportUser = '/safety/report';
   static const diagnostics = '/diagnostics/config';
   static const home = '/home';
-  static const searchRides = '/rides/search';
+  static const action = '/rides/action';
+  static const searchRides = action;
   static const searchResults = '/rides/results';
+  static const leavingSoon = '/rides/leaving-soon';
   static const rideDetails = '/rides/:rideId';
-  static const postRide = '/rides/post';
+  static const postRide = action;
   static const myRides = '/rides/mine';
+  static const messages = '/messages';
+  static const account = '/account';
+  static const stripeRedirect = '/stripe-redirect';
 
   static String get initialLocation {
     const buildRoute = String.fromEnvironment('SIDECAR_INITIAL_ROUTE');
@@ -57,9 +64,24 @@ abstract final class AppRoutes {
   }
 }
 
+final _rootNavigatorKey = GlobalKey<NavigatorState>();
+final _homeNavigatorKey = GlobalKey<NavigatorState>();
+final _actionNavigatorKey = GlobalKey<NavigatorState>();
+final _ridesNavigatorKey = GlobalKey<NavigatorState>();
+final _messagesNavigatorKey = GlobalKey<NavigatorState>();
+final _accountNavigatorKey = GlobalKey<NavigatorState>();
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
+    navigatorKey: _rootNavigatorKey,
     initialLocation: AppRoutes.initialLocation,
+    redirect: (_, state) {
+      if (!isStripeReturnLocation(state.uri)) return null;
+      return stripeReturnDestination(
+        state.uri,
+        signedIn: ref.read(authRepositoryProvider).currentUser != null,
+      );
+    },
     routes: [
       GoRoute(
         path: AppRoutes.opening,
@@ -167,13 +189,79 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.diagnostics,
         builder: (_, _) => const ConfigDiagnosticsScreen(),
       ),
-      GoRoute(path: AppRoutes.home, builder: (_, _) => const RideHomeScreen()),
       GoRoute(
-        path: AppRoutes.searchRides,
-        builder: (_, _) => const SearchRidesScreen(),
+        path: AppRoutes.stripeRedirect,
+        redirect: (_, _) => AppRoutes.account,
+      ),
+      StatefulShellRoute.indexedStack(
+        builder: (_, _, navigationShell) =>
+            MainTabShell(navigationShell: navigationShell),
+        branches: [
+          StatefulShellBranch(
+            navigatorKey: _homeNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.home,
+                pageBuilder: (_, state) => NoTransitionPage(
+                  key: state.pageKey,
+                  child: const RideHomeScreen(),
+                ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: _actionNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.action,
+                pageBuilder: (_, state) => NoTransitionPage(
+                  key: state.pageKey,
+                  child: const RoleActionTab(),
+                ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: _ridesNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.myRides,
+                pageBuilder: (_, state) => NoTransitionPage(
+                  key: state.pageKey,
+                  child: const RoleMyRidesTab(),
+                ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: _messagesNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.messages,
+                pageBuilder: (_, state) => NoTransitionPage(
+                  key: state.pageKey,
+                  child: const MessagesTabScreen(),
+                ),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            navigatorKey: _accountNavigatorKey,
+            routes: [
+              GoRoute(
+                path: AppRoutes.account,
+                pageBuilder: (_, state) => NoTransitionPage(
+                  key: state.pageKey,
+                  child: const AccountTab(),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       GoRoute(
         path: AppRoutes.searchResults,
+        parentNavigatorKey: _rootNavigatorKey,
         builder: (_, state) => SearchResultsScreen(
           criteria:
               state.extra as RideSearchCriteria? ??
@@ -188,17 +276,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: AppRoutes.leavingSoon,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, _) => const LeavingSoonScreen(),
+      ),
+      GoRoute(
         path: AppRoutes.rideDetails,
+        parentNavigatorKey: _rootNavigatorKey,
         builder: (_, state) =>
             RideDetailsScreen(rideId: state.pathParameters['rideId'] ?? ''),
-      ),
-      GoRoute(
-        path: AppRoutes.postRide,
-        builder: (_, _) => const PostRideScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.myRides,
-        builder: (_, _) => const MyRidesScreen(),
       ),
     ],
   );
@@ -206,3 +292,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   ref.onDispose(router.dispose);
   return router;
 });
+
+bool isStripeReturnLocation(Uri uri) {
+  if (uri.scheme == 'sidecar' && uri.host == 'stripe-redirect') return true;
+  if (uri.scheme == 'sidecar' &&
+      uri.host == 'app' &&
+      uri.path == AppRoutes.stripeRedirect) {
+    return true;
+  }
+  return uri.scheme.isEmpty && uri.path == AppRoutes.stripeRedirect;
+}
+
+String? stripeReturnDestination(Uri uri, {required bool signedIn}) {
+  if (!isStripeReturnLocation(uri)) return null;
+  return signedIn ? AppRoutes.account : AppRoutes.opening;
+}

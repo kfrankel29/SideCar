@@ -73,3 +73,12 @@ export function locationMatches(locationText: string, searchText: string): boole
   const candidate = normalizeSearchText(locationText);
   return queryTokens.every((token) => candidate.includes(token));
 }
+
+export function matchesDriverLanguage(
+  driverLanguage: unknown,
+  requiredLanguage: string,
+): boolean {
+  if (!requiredLanguage.trim()) return true;
+  return normalizeSearchText(String(driverLanguage ?? "")) ===
+    normalizeSearchText(requiredLanguage);
+}

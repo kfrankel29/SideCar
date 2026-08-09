@@ -11,6 +11,9 @@ import 'package:sidecar/src/core/widgets/sidecar_scaffold.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
+import 'package:sidecar/src/features/session/domain/app_flow_state.dart';
+import 'package:sidecar/src/features/verification/domain/verification_models.dart';
+import 'package:sidecar/src/features/verification/domain/verification_repository.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
@@ -39,11 +42,20 @@ String? _passwordError(String value) {
   return null;
 }
 
-String _routeForProfile(UserProfile profile) {
-  if (!profile.isComplete) return AppRoutes.profile;
-  return profile.primaryRole == null
-      ? AppRoutes.onboarded
-      : AppRoutes.profileGate;
+String _routeForAppFlow(UserProfile profile, VerificationSummary verification) {
+  return switch (resolveAppFlowStage(profile, verification)) {
+    AppFlowStage.profileSetup => AppRoutes.profile,
+    AppFlowStage.roleSelection => AppRoutes.onboarded,
+    AppFlowStage.verification => AppRoutes.verification,
+    AppFlowStage.main => AppRoutes.home,
+  };
+}
+
+Future<String> _routeForProfile(WidgetRef ref, UserProfile profile) async {
+  final verification = profile.isComplete && profile.primaryRole != null
+      ? await ref.read(verificationRepositoryProvider).loadCurrentVerification()
+      : const VerificationSummary();
+  return _routeForAppFlow(profile, verification);
 }
 
 class OpeningScreen extends ConsumerStatefulWidget {
@@ -56,6 +68,8 @@ class OpeningScreen extends ConsumerStatefulWidget {
 }
 
 class _OpeningScreenState extends ConsumerState<OpeningScreen> {
+  String? _error;
+
   @override
   void initState() {
     super.initState();
@@ -63,6 +77,7 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
   }
 
   Future<void> _continueFromLaunch() async {
+    if (mounted) setState(() => _error = null);
     await Future<void>.delayed(const Duration(milliseconds: 1100));
     if (!mounted) return;
 
@@ -89,14 +104,20 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
         );
         return;
       }
-      context.go(_routeForProfile(profile));
+      final verification = profile.isComplete && profile.primaryRole != null
+          ? await ref
+                .read(verificationRepositoryProvider)
+                .loadCurrentVerification()
+          : const VerificationSummary();
+      if (!mounted) return;
+      context.go(_routeForAppFlow(profile, verification));
     } on Object {
-      try {
-        await ref.read(authRepositoryProvider).signOut();
-      } on Object {
-        // Server state could not be verified, so continue to the signed-out UI.
+      if (mounted) {
+        setState(
+          () => _error =
+              'We could not refresh your account. Check your connection and try again.',
+        );
       }
-      if (mounted) context.go(AppRoutes.welcome);
     }
   }
 
@@ -116,7 +137,7 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
                   ),
                   const SizedBox(height: 5),
                   Text(
-                      'The easy way home.',
+                    'The easy way home.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -128,7 +149,7 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
               bottom: 30,
               child: Center(
                 child: SizedBox(
-                    width: 120,
+                  width: 120,
                   child: LinearProgressIndicator(
                     minHeight: 2,
                     backgroundColor: Color(0xFFE4E4E4),
@@ -137,6 +158,25 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
                 ),
               ),
             ),
+            if (_error != null)
+              Positioned(
+                left: 24,
+                right: 24,
+                bottom: 74,
+                child: Column(
+                  children: [
+                    Text(
+                      _error!,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    TextButton(
+                      onPressed: _continueFromLaunch,
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
@@ -167,7 +207,7 @@ class WelcomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 109),
               Text(
-                  'For students. By students.',
+                'For students. By students.',
                 style: Theme.of(context).textTheme.labelLarge,
               ),
               const SizedBox(height: 8),
@@ -248,7 +288,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         if (mounted) context.go(AppRoutes.welcome);
         return;
       }
-      context.go(_routeForProfile(profile));
+      final route = await _routeForProfile(ref, profile);
+      if (mounted) context.go(route);
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
@@ -272,7 +313,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         if (mounted) context.go(AppRoutes.welcome);
         return;
       }
-      context.go(_routeForProfile(profile));
+      final route = await _routeForProfile(ref, profile);
+      if (mounted) context.go(route);
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
@@ -425,7 +467,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
         if (mounted) context.go(AppRoutes.welcome);
         return;
       }
-      context.go(_routeForProfile(profile));
+      final route = await _routeForProfile(ref, profile);
+      if (mounted) context.go(route);
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } on Object {

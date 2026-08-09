@@ -111,12 +111,13 @@ class FirebaseVerificationRepository implements VerificationRepository {
   }
 
   @override
-  Future<Uri> createIdentityVerificationSession() async {
+  Future<Uri?> createIdentityVerificationSession() async {
     try {
       final result = await _functions
           .httpsCallable('createIdentityVerificationSession')
           .call<Map<String, dynamic>>()
           .timeout(_timeout);
+      if (result.data['verified'] == true) return null;
       final value = result.data['url'];
       final uri = value is String ? Uri.tryParse(value) : null;
       if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
@@ -232,6 +233,25 @@ class FirebaseVerificationRepository implements VerificationRepository {
       );
     }
   }
+
+  @override
+  Future<void> verifyInsuranceForTesting() async {
+    try {
+      await _functions
+          .httpsCallable('verifyInsuranceForTesting')
+          .call<Map<String, dynamic>>()
+          .timeout(_timeout);
+    } on TimeoutException {
+      throw const AppFailure(
+        'Test verification took too long. Check your connection.',
+      );
+    } on FirebaseFunctionsException catch (error) {
+      throw AppFailure(
+        error.message ?? 'We could not verify insurance for testing.',
+        code: error.code,
+      );
+    }
+  }
 }
 
 class UnavailableVerificationRepository implements VerificationRepository {
@@ -243,7 +263,7 @@ class UnavailableVerificationRepository implements VerificationRepository {
   );
 
   @override
-  Future<Uri> createIdentityVerificationSession() async => _notReady();
+  Future<Uri?> createIdentityVerificationSession() async => _notReady();
 
   @override
   Future<VerificationSummary> loadCurrentVerification() async =>
@@ -263,6 +283,9 @@ class UnavailableVerificationRepository implements VerificationRepository {
     required Uint8List bytes,
     required String contentType,
   }) async => _notReady();
+
+  @override
+  Future<void> verifyInsuranceForTesting() async => _notReady();
 
   @override
   Stream<VerificationSummary> watchCurrentVerification() =>

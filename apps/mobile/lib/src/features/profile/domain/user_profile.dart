@@ -1,5 +1,27 @@
 enum PrimaryRole { rider, driver }
 
+const supportedSpokenLanguages = <String>[
+  'English',
+  'Spanish',
+  'Mandarin Chinese',
+  'Cantonese',
+  'Hindi',
+  'Punjabi',
+  'Vietnamese',
+  'Korean',
+  'Japanese',
+  'Arabic',
+  'French',
+  'Persian',
+  'Russian',
+  'Portuguese',
+  'German',
+  'Italian',
+  'Tagalog',
+  'Urdu',
+  'Uzbek',
+];
+
 class UserProfile {
   const UserProfile({
     required this.userId,
@@ -13,6 +35,10 @@ class UserProfile {
     this.homeBase = '',
     this.major = '',
     this.graduationYear = 0,
+    this.rating = 0,
+    this.tripCount = 0,
+    this.creditCents = 0,
+    this.totalEarningsCents = 0,
     this.primaryRole,
   });
 
@@ -28,6 +54,10 @@ class UserProfile {
   final String homeBase;
   final String major;
   final int graduationYear;
+  final double rating;
+  final int tripCount;
+  final int creditCents;
+  final int totalEarningsCents;
 
   final String photoUrl;
   final PrimaryRole? primaryRole;
@@ -58,6 +88,16 @@ class UserProfile {
       homeBase: json['homeBase'] as String? ?? '',
       major: json['major'] as String? ?? '',
       graduationYear: (json['graduationYear'] as num?)?.toInt() ?? 0,
+      rating:
+          (json['rating'] as num?)?.toDouble() ??
+          (json['driverRating'] as num?)?.toDouble() ??
+          0,
+      tripCount:
+          (json['tripCount'] as num?)?.toInt() ??
+          (json['driverTrips'] as num?)?.toInt() ??
+          0,
+      creditCents: (json['creditCents'] as num?)?.toInt() ?? 0,
+      totalEarningsCents: (json['totalEarningsCents'] as num?)?.toInt() ?? 0,
       photoUrl: json['photoUrl'] as String? ?? '',
       primaryRole: switch (roleValue) {
         'rider' => PrimaryRole.rider,
@@ -103,6 +143,10 @@ class UserProfile {
       homeBase: homeBase,
       major: major,
       graduationYear: graduationYear,
+      rating: rating,
+      tripCount: tripCount,
+      creditCents: creditCents,
+      totalEarningsCents: totalEarningsCents,
       photoUrl: photoUrl ?? this.photoUrl,
       primaryRole: primaryRole ?? this.primaryRole,
     );

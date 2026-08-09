@@ -8,20 +8,47 @@ import {defineSecret} from "firebase-functions/params";
 import {HttpsError, onCall, onRequest} from "firebase-functions/v2/https";
 import Stripe from "stripe";
 import {parseManualInsuranceDocument} from "./manual_insurance.js";
+import {insuranceTestVerificationEligibility} from "./insurance_test_verification.js";
 import {
+  stripeIdentityExistingSessionOutcome,
   stripeIdentitySessionUid,
   stripeIdentityStatusForEvent,
 } from "./stripe_identity.js";
 
 export {
+  cancelRide,
   createRide,
   getRide,
   listLeavingSoon,
   listMyRides,
+  rideMapPreview,
   rideSharePage,
   searchPlaces,
   searchRides,
+  updateRide,
 } from "./rides.js";
+
+export {
+  cancelDriverRide,
+  cancelSeatBooking,
+  completeTrip,
+  createBookingPayment,
+  createDriverConnectAccount,
+  createPaymentMethodSetup,
+  disputeBooking,
+  expireUnpaidBookings,
+  getDriverPayoutStatus,
+  listMyBookings,
+  listPaymentMethods,
+  listRideRequests,
+  quoteBookingPayment,
+  refreshBooking,
+  requestSeat,
+  respondSeatRequest,
+  settleTrips,
+  stripePaymentsWebhook,
+  verifyPickupCode,
+} from "./bookings.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -453,26 +480,29 @@ export const createIdentityVerificationSession = onCall(
     const stripe = new Stripe(stripeSecretKey.value());
     const statusReference = db.collection("users").doc(user.uid)
       .collection("verifications").doc("current");
-    const existingSessionId =
-      (await statusReference.get()).data()?.stripeVerificationSessionId;
+    const statusData = (await statusReference.get()).data();
+    if (statusData?.identityStatus === "verified") {
+      return {verified: true};
+    }
+    const existingSessionId = statusData?.stripeVerificationSessionId;
     if (typeof existingSessionId === "string" && existingSessionId.length > 0) {
       try {
         const existing = await stripe.identity.verificationSessions.retrieve(
           existingSessionId,
         );
-        if (existing.status === "verified") {
-          throw new HttpsError(
-            "failed-precondition",
-            "Your identity is already verified.",
-          );
+        const outcome = stripeIdentityExistingSessionOutcome(existing);
+        if (outcome.kind === "verified") {
+          await statusReference.set({
+            identityStatus: "verified",
+            lastError: "",
+            updatedAt: FieldValue.serverTimestamp(),
+          }, {merge: true});
+          return {verified: true};
         }
-        if (existing.url) {
-          return {url: existing.url};
+        if (outcome.kind === "resume") {
+          return {url: outcome.url};
         }
       } catch (error) {
-        if (error instanceof HttpsError) {
-          throw error;
-        }
         if (!(error instanceof Stripe.errors.StripeInvalidRequestError) ||
             error.code !== "resource_missing") {
           throw new HttpsError(
@@ -562,6 +592,73 @@ export const stripeIdentityWebhook = onRequest(
         updatedAt: FieldValue.serverTimestamp(),
       }, {merge: true});
     response.status(200).send("Received");
+  },
+);
+
+export const verifyInsuranceForTesting = onCall(
+  {
+    region,
+    enforceAppCheck: true,
+    maxInstances: 20,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
+    }
+
+    const uid = request.auth.uid;
+    const [user, statusSnapshot, vehicleSnapshot, testEmails] = await Promise.all([
+      auth.getUser(uid),
+      db.collection("users").doc(uid)
+        .collection("verifications").doc("current").get(),
+      db.collection("users").doc(uid)
+        .collection("vehicles").doc("primary").get(),
+      allowedTestEmails(),
+    ]);
+    const eligibility = insuranceTestVerificationEligibility({
+      email: user.email,
+      emailVerified: user.emailVerified,
+      schoolEmailVerified: request.auth.token.schoolEmailVerified === true,
+      allowedTestEmails: testEmails,
+      identityStatus: statusSnapshot.data()?.identityStatus,
+      vehicleComplete: vehicleSnapshot.data()?.complete,
+    });
+
+    if (!eligibility.allowed) {
+      if (eligibility.reason === "identity") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete identity verification before testing insurance.",
+        );
+      }
+      if (eligibility.reason === "vehicle") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Complete your vehicle profile before testing insurance.",
+        );
+      }
+      if (eligibility.reason === "email-verification") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Verify your email before testing insurance.",
+        );
+      }
+      throw new HttpsError(
+        "permission-denied",
+        "Test insurance verification is not available for this account.",
+      );
+    }
+
+    await statusSnapshot.ref.set({
+      insuranceStatus: "verified",
+      insuranceVerificationProvider: "test",
+      insuranceVerifiedAt: FieldValue.serverTimestamp(),
+      manualInsuranceSubmitted: false,
+      lastError: "",
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+
+    return {verified: true};
   },
 );
 

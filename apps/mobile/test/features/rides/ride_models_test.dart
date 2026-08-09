@@ -42,7 +42,9 @@ void main() {
       'driverId': 'driver-1',
       'driverName': 'Jordan T.',
       'driverInitials': 'JT',
+      'driverPhotoUrl': 'https://example.com/jordan.jpg',
       'driverGender': 'male',
+      'driverLanguage': 'Uzbek',
       'driverRating': 4.9,
       'driverTrips': 12,
       'vehicle': {
@@ -70,12 +72,14 @@ void main() {
       'durationSeconds': 18400,
       'seatsTotal': 3,
       'seatsAvailable': 2,
+      'bookedSeats': 1,
       'pricePerSeatCents': 5587,
       'maximumPriceCents': 5600,
       'luggageAllowance': 'one_suitcase',
       'genderRestriction': 'any',
       'status': 'published',
       'shareUrl': 'https://example.com/ride-1',
+      'mapPreviewUrl': 'https://example.com/ride-map?id=ride-1',
       'encodedPolyline': 'abc',
       'repeatWeekly': true,
       'recurrenceId': 'series-1',
@@ -84,9 +88,39 @@ void main() {
     expect(ride.priceLabel, r'$55.87');
     expect(ride.luggageAllowance, LuggageAllowance.oneSuitcase);
     expect(ride.seatsAvailable, 2);
+    expect(ride.bookedSeats, 1);
+    expect(ride.driverLanguage, 'Uzbek');
+    expect(ride.driverPhotoUrl, 'https://example.com/jordan.jpg');
     expect(ride.vehicle.makeAndModel, 'Honda CR-V');
+    expect(ride.mapPreviewUrl, 'https://example.com/ride-map?id=ride-1');
     expect(ride.encodedPolyline, 'abc');
     expect(ride.repeatWeekly, isTrue);
     expect(ride.recurrenceId, 'series-1');
+  });
+
+  test('cancelled rides never report refunded seats as booked', () {
+    final ride = Ride.fromJson({
+      'seatsTotal': 3,
+      'seatsAvailable': 0,
+      'bookedSeats': 3,
+      'status': 'cancelled',
+    });
+
+    expect(ride.bookedSeats, 0);
+    expect(ride.seatsAvailable, 3);
+  });
+
+  test('ride search serializes the selected spoken language', () {
+    final criteria = RideSearchCriteria(
+      originQuery: 'UCSB',
+      destinationQuery: 'Palo Alto',
+      pickupPlaceId: 'pickup',
+      dropoffPlaceId: 'dropoff',
+      startAt: DateTime.utc(2026, 8, 10),
+      endAt: DateTime.utc(2026, 8, 11),
+      driverLanguage: 'Uzbek',
+    );
+
+    expect(criteria.toJson()['driverLanguage'], 'Uzbek');
   });
 }

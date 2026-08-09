@@ -2,7 +2,7 @@
   "conditions": [],
   "parameters": {
     "config_version": {
-      "defaultValue": {"value": "m3-rides"},
+      "defaultValue": {"value": "m4-bookings-payments"},
       "description": "Visible version marker used for acceptance testing.",
       "valueType": "STRING"
     },
@@ -13,7 +13,7 @@
     },
     "allowed_test_emails": {
       "defaultValue": {
-        "value": "[\"alijonovshohruhmirzo@gmail.com\",\"shohruh@fera-tech.com\",\"shohruxa26@gmail.com\",\"shohruhmirzoalijonov@gmail.com\"]"
+        "value": "[\"alijonovshohruhmirzo@gmail.com\",\"shohruh@fera-tech.com\",\"shohruxa26@gmail.com\",\"shohruhmirzoalijonov@gmail.com\",\"kfrankel@ucsb.edu\"]"
       },
       "description": "JSON array of exact non-school email addresses allowed for controlled testing.",
       "valueType": "JSON"
@@ -24,7 +24,7 @@
       "valueType": "STRING"
     },
     "service_fee_value": {
-      "defaultValue": {"value": "10"},
+      "defaultValue": {"value": "8"},
       "description": "Service fee percentage or dollar amount, depending on type.",
       "valueType": "NUMBER"
     },
@@ -64,9 +64,9 @@
     },
     "refund_rules_json": {
       "defaultValue": {
-        "value": "[{\"minimumHoursBeforeTrip\":168,\"riderRefundPercentage\":100,\"platformPercentage\":0,\"driverPercentage\":0},{\"minimumHoursBeforeTrip\":1,\"riderRefundPercentage\":50,\"platformPercentage\":10,\"driverPercentage\":40},{\"minimumHoursBeforeTrip\":0,\"riderRefundPercentage\":0,\"platformPercentage\":10,\"driverPercentage\":90}]"
+        "value": "[{\"minimumHoursBeforeTrip\":168,\"riderRefundPercentage\":100,\"platformPercentage\":0,\"driverPercentage\":0},{\"minimumHoursBeforeTrip\":24,\"minimumHoursExclusive\":true,\"riderRefundPercentage\":50,\"platformPercentage\":8,\"driverPercentage\":42},{\"minimumHoursBeforeTrip\":0,\"riderRefundPercentage\":0,\"platformPercentage\":8,\"driverPercentage\":92}]"
       },
-      "description": "Ordered cancellation/refund tiers. Server code must enforce these when payments are implemented.",
+      "description": "Ordered cancellation and refund tiers enforced by the booking service.",
       "valueType": "JSON"
     },
     "payment_expiration_hours": {
@@ -78,6 +78,31 @@
       "defaultValue": {"value": "48"},
       "description": "Backup trip auto-complete window after scheduled time.",
       "valueType": "NUMBER"
+    },
+    "stripe_card_percentage": {
+      "defaultValue": {"value": "2.9"},
+      "description": "Stripe card processing percentage used to calculate the inclusive rider price.",
+      "valueType": "NUMBER"
+    },
+    "stripe_card_fixed_cents": {
+      "defaultValue": {"value": "30"},
+      "description": "Stripe card fixed processing fee in cents.",
+      "valueType": "NUMBER"
+    },
+    "stripe_bank_percentage": {
+      "defaultValue": {"value": "0.8"},
+      "description": "Stripe bank payment processing percentage.",
+      "valueType": "NUMBER"
+    },
+    "stripe_connect_return_url": {
+      "defaultValue": {"value": "https://sidecar-fb0e7.web.app/stripe/return"},
+      "description": "Stripe Connect onboarding return URL.",
+      "valueType": "STRING"
+    },
+    "stripe_connect_refresh_url": {
+      "defaultValue": {"value": "https://sidecar-fb0e7.web.app/stripe/refresh"},
+      "description": "Stripe Connect onboarding refresh URL.",
+      "valueType": "STRING"
     }
   },
   "parameterGroups": {}

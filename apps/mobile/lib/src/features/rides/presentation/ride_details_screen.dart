@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
+import 'package:sidecar/src/core/platform/app_haptics.dart';
+import 'package:sidecar/src/core/widgets/app_notice.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
+import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_widgets.dart';
+import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 class RideDetailsScreen extends ConsumerStatefulWidget {
@@ -18,6 +25,7 @@ class RideDetailsScreen extends ConsumerStatefulWidget {
 
 class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
   late Future<Ride> _ride;
+  bool _requesting = false;
 
   @override
   void initState() {
@@ -28,21 +36,109 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
   void _load() =>
       _ride = ref.read(rideRepositoryProvider).getRide(widget.rideId);
 
+  Future<void> _cancelRide(Ride ride) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel this ride?'),
+        content: const Text(
+          'The ride will be removed from search and can no longer accept riders.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep ride'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancel ride'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await ref.read(bookingRepositoryProvider).cancelDriverRide(ride.id);
+      if (mounted) {
+        showAppNotice(
+          context,
+          'Ride cancelled. Confirmed riders were refunded.',
+        );
+        context.pop();
+      }
+    } on AppFailure catch (error) {
+      if (!mounted) return;
+      showAppNotice(context, error.message, kind: AppNoticeKind.error);
+    }
+  }
+
+  Future<void> _requestSeat(Ride ride) async {
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Request this seat?',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'The driver must accept first. You will not be charged until you review the cancellation policy and complete payment.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Send request'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Not now'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _requesting = true);
+    try {
+      await ref.read(bookingRepositoryProvider).requestSeat(ride.id);
+      if (!mounted) return;
+      showAppNotice(context, 'Seat request sent. The driver will review it.');
+      context.pop();
+    } on AppFailure catch (error) {
+      if (mounted) {
+        showAppNotice(context, error.message, kind: AppNoticeKind.error);
+      }
+    } finally {
+      if (mounted) setState(() => _requesting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: FutureBuilder<Ride>(
-          future: _ride,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError || snapshot.data == null) {
-              final message = snapshot.error is AppFailure
-                  ? (snapshot.error! as AppFailure).message
-                  : 'That ride is no longer available.';
-              return Center(
+      body: FutureBuilder<Ride>(
+        future: _ride,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const SafeArea(
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          if (snapshot.hasError || snapshot.data == null) {
+            final message = snapshot.error is AppFailure
+                ? (snapshot.error! as AppFailure).message
+                : 'That ride is no longer available.';
+            return SafeArea(
+              child: Center(
                 child: Padding(
                   padding: const EdgeInsets.all(28),
                   child: Column(
@@ -56,23 +152,47 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
                     ],
                   ),
                 ),
-              );
-            }
-            return _RideDetails(ride: snapshot.data!);
-          },
-        ),
+              ),
+            );
+          }
+          final ride = snapshot.data!;
+          final isOwner =
+              ref.read(authRepositoryProvider).currentUser?.id == ride.driverId;
+          return _RideDetails(
+            ride: ride,
+            isOwner: isOwner,
+            onCancel: () => _cancelRide(ride),
+            requesting: _requesting,
+            onRequest: () => _requestSeat(ride),
+          );
+        },
       ),
     );
   }
 }
 
 class _RideDetails extends StatelessWidget {
-  const _RideDetails({required this.ride});
+  const _RideDetails({
+    required this.ride,
+    required this.isOwner,
+    required this.onCancel,
+    required this.requesting,
+    required this.onRequest,
+  });
 
   final Ride ride;
+  final bool isOwner;
+  final VoidCallback onCancel;
+  final bool requesting;
+  final VoidCallback onRequest;
 
   @override
   Widget build(BuildContext context) {
+    final topInset = MediaQuery.paddingOf(context).top;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    if (isOwner) {
+      return _OwnerRideDetailsPage(ride: ride, onCancel: onCancel);
+    }
     return Column(
       children: [
         Expanded(
@@ -81,14 +201,21 @@ class _RideDetails extends StatelessWidget {
             children: [
               Stack(
                 children: [
-                  RideMapPreview(encodedPolyline: ride.encodedPolyline),
+                  RideMapPreview(
+                    mapPreviewUrl: ride.mapPreviewUrl,
+                    topExtension: topInset,
+                  ),
                   Positioned(
                     left: 18,
-                    top: 12,
-                    child: IconButton.filledTonal(
-                      tooltip: 'Back',
-                      onPressed: context.pop,
-                      icon: const Icon(Icons.chevron_left_rounded),
+                    top: topInset + 8,
+                    child: Material(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      child: IconButton(
+                        tooltip: 'Back',
+                        onPressed: context.pop,
+                        icon: const FinalDraftBackIcon(size: 23),
+                      ),
                     ),
                   ),
                 ],
@@ -100,7 +227,10 @@ class _RideDetails extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        RideAvatar(initials: ride.driverInitials),
+                        RideAvatar(
+                          initials: ride.driverInitials,
+                          photoUrl: ride.driverPhotoUrl,
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
@@ -112,13 +242,18 @@ class _RideDetails extends StatelessWidget {
                               ),
                               const SizedBox(height: 3),
                               Text(
-                                '★ ${ride.driverRating == 0 ? 'New' : ride.driverRating.toStringAsFixed(1)} · ${ride.driverTrips} trips · ${ride.vehicle.year}',
+                                [
+                                  if (ride.driverRating > 0)
+                                    '★ ${ride.driverRating.toStringAsFixed(1)}',
+                                  '${ride.driverTrips} trips',
+                                  if (ride.vehicle.year > 0)
+                                    '${ride.vehicle.year}',
+                                ].join(' · '),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
                           ),
                         ),
-                        const RideBadge(label: 'Verified', checked: true),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -131,6 +266,8 @@ class _RideDetails extends StatelessWidget {
                             '${formatShortDate(ride.departureAt)} · ${formatTime(ride.departureAt)}',
                         destinationSubtitle:
                             'ETA ${formatTime(ride.departureAt.add(Duration(seconds: ride.durationSeconds)))}',
+                        backgroundColor: AppColors.softSurface,
+                        showBorder: false,
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -174,7 +311,7 @@ class _RideDetails extends StatelessWidget {
           ),
         ),
         Container(
-          padding: const EdgeInsets.fromLTRB(24, 13, 24, 18),
+          padding: EdgeInsets.fromLTRB(24, 13, 24, 12 + bottomInset),
           decoration: const BoxDecoration(
             border: Border(top: BorderSide(color: AppColors.softSurface)),
           ),
@@ -197,22 +334,423 @@ class _RideDetails extends StatelessWidget {
               ),
               SizedBox(
                 width: 180,
-                child: Semantics(
-                  button: true,
-                  enabled: false,
-                  label: 'Request seat',
-                  child: IgnorePointer(
-                    child: FilledButton(
-                      onPressed: () {},
-                      child: const Text('Request seat'),
-                    ),
-                  ),
+                child: FilledButton(
+                  onPressed: requesting || ride.seatsAvailable < 1
+                      ? null
+                      : AppHaptics.wrap(onRequest),
+                  child: Text(requesting ? 'Sending…' : 'Request seat'),
                 ),
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _OwnerRideDetailsPage extends ConsumerStatefulWidget {
+  const _OwnerRideDetailsPage({required this.ride, required this.onCancel});
+
+  final Ride ride;
+  final VoidCallback onCancel;
+
+  @override
+  ConsumerState<_OwnerRideDetailsPage> createState() =>
+      _OwnerRideDetailsPageState();
+}
+
+class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
+  late Future<List<SeatBooking>> _bookings;
+
+  @override
+  void initState() {
+    super.initState();
+    _bookings = ref
+        .read(bookingRepositoryProvider)
+        .listRideRequests(rideId: widget.ride.id, forceRefresh: true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ride = widget.ride;
+    final booked = ride.bookedSeats;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        children: [
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 17, 24, 24),
+              children: [
+                SizedBox(
+                  height: 80,
+                  child: Stack(
+                    alignment: Alignment.topCenter,
+                    children: [
+                      Positioned(
+                        left: 0,
+                        top: 2,
+                        child: IconButton(
+                          tooltip: 'Back',
+                          padding: EdgeInsets.zero,
+                          onPressed: context.pop,
+                          icon: const FinalDraftBackIcon(size: 23),
+                        ),
+                      ),
+                      Column(
+                        children: [
+                          Text(
+                            'Your ride',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${formatShortDate(ride.departureAt)} · ${formatTime(ride.departureAt)}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 9),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 17,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.ink,
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                            child: Text(
+                              '$booked/${ride.seatsTotal} booked',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: RideMapPreview(mapPreviewUrl: ride.mapPreviewUrl),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 112,
+                  child: RideRouteCard(
+                    origin: ride.origin.displayName,
+                    destination: ride.destination.displayName,
+                    originSubtitle: 'Dep ${formatTime(ride.departureAt)}',
+                    destinationSubtitle:
+                        'ETA ${formatTime(ride.departureAt.add(Duration(seconds: ride.durationSeconds)))}',
+                    backgroundColor: AppColors.softSurface,
+                    showBorder: false,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _DetailValue(
+                        label: 'Price / seat',
+                        value: ride.priceLabel,
+                      ),
+                    ),
+                    Expanded(
+                      child: _DetailValue(
+                        label: 'Luggage per rider',
+                        value: ride.luggageAllowance.label,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _DetailValue(
+                  label: 'Rider preference',
+                  value: ride.genderRestriction.label,
+                ),
+                const SizedBox(height: 36),
+                Text(
+                  'Your riders',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                FutureBuilder<List<SeatBooking>>(
+                  future: _bookings,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final riders = (snapshot.data ?? const <SeatBooking>[])
+                        .where(
+                          (booking) => [
+                            BookingStatus.confirmed,
+                            BookingStatus.inProgress,
+                            BookingStatus.completed,
+                          ].contains(booking.status),
+                        )
+                        .toList();
+                    if (riders.isEmpty) {
+                      return Text(
+                        'No riders yet.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      );
+                    }
+                    return Column(
+                      children: [
+                        for (final booking in riders) ...[
+                          _OwnerRiderRow(booking: booking),
+                          const SizedBox(height: 9),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+                if (ride.seatsAvailable > 0) ...[
+                  const SizedBox(height: 8),
+                  CustomPaint(
+                    painter: _DashedRoundedBorderPainter(
+                      color: const Color(0xFFC9C9CE),
+                      radius: 10,
+                    ),
+                    child: SizedBox(
+                      height: 46,
+                      child: Center(
+                        child: Text(
+                          '${ride.seatsAvailable} ${ride.seatsAvailable == 1 ? 'seat' : 'seats'} open — share your ride link',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Container(
+            padding: EdgeInsets.fromLTRB(24, 10, 24, bottomInset + 12),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFFE2DE),
+                          foregroundColor: AppColors.danger,
+                        ),
+                        onPressed: ride.status == 'published'
+                            ? AppHaptics.wrap(widget.onCancel)
+                            : null,
+                        child: const Text('Cancel ride'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.softSurface,
+                          foregroundColor: AppColors.ink,
+                        ),
+                        onPressed: ride.shareUrl.isEmpty
+                            ? null
+                            : () => SharePlus.instance.share(
+                                ShareParams(text: ride.shareUrl),
+                              ),
+                        child: const Text('Share link'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                FutureBuilder<List<SeatBooking>>(
+                  future: _bookings,
+                  builder: (context, snapshot) {
+                    final confirmed = (snapshot.data ?? const <SeatBooking>[])
+                        .where(
+                          (booking) =>
+                              booking.status == BookingStatus.confirmed,
+                        )
+                        .toList();
+                    return FilledButton(
+                      onPressed: confirmed.isEmpty
+                          ? null
+                          : () => _showPickupCodeSheet(confirmed),
+                      child: const Text('Start trip'),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showPickupCodeSheet(List<SeatBooking> bookings) async {
+    final controller = TextEditingController();
+    SeatBooking selected = bookings.first;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            24,
+            24,
+            24,
+            MediaQuery.viewInsetsOf(context).bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Enter pickup code',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Ask the rider for the 4-digit code before starting the trip.',
+              ),
+              if (bookings.length > 1) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<SeatBooking>(
+                  initialValue: selected,
+                  items: [
+                    for (final booking in bookings)
+                      DropdownMenuItem(
+                        value: booking,
+                        child: Text(booking.riderName),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setSheetState(() => selected = value);
+                  },
+                ),
+              ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                decoration: const InputDecoration(labelText: 'Pickup code'),
+              ),
+              FilledButton(
+                onPressed: () async {
+                  try {
+                    await ref
+                        .read(bookingRepositoryProvider)
+                        .verifyPickupCode(selected.id, controller.text);
+                    if (context.mounted) {
+                      showAppNotice(context, 'Pickup confirmed. Trip started.');
+                      Navigator.pop(context);
+                    }
+                  } on AppFailure catch (error) {
+                    if (context.mounted) {
+                      showAppNotice(
+                        context,
+                        error.message,
+                        kind: AppNoticeKind.error,
+                      );
+                    }
+                  }
+                },
+                child: const Text('Verify and start trip'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    controller.dispose();
+  }
+}
+
+class _DashedRoundedBorderPainter extends CustomPainter {
+  const _DashedRoundedBorderPainter({
+    required this.color,
+    required this.radius,
+  });
+
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)),
+      );
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        canvas.drawPath(metric.extractPath(distance, distance + 4), paint);
+        distance += 8;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRoundedBorderPainter oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.radius != radius;
+}
+
+class _OwnerRiderRow extends StatelessWidget {
+  const _OwnerRiderRow({required this.booking});
+
+  final SeatBooking booking;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 58,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          RideAvatar(
+            initials: booking.riderInitials,
+            photoUrl: booking.riderPhotoUrl,
+            radius: 16,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  booking.riderName,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                Text(
+                  booking.status == BookingStatus.inProgress
+                      ? 'Trip in progress'
+                      : 'Pickup code ready',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Message rider',
+            onPressed: () {},
+            icon: const Icon(Icons.chat_bubble_outline, size: 20),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -243,7 +781,11 @@ class _SeatDiagram extends StatelessWidget {
               const Expanded(child: _Seat(label: 'Driver', taken: true)),
               const SizedBox(width: 10),
               Expanded(
-                child: _Seat(label: seats[0], price: ride.priceLabel),
+                child: _Seat(
+                  label: seats[0],
+                  price: ride.priceLabel,
+                  selected: true,
+                ),
               ),
             ],
           ),
@@ -271,11 +813,17 @@ class _SeatDiagram extends StatelessWidget {
 }
 
 class _Seat extends StatelessWidget {
-  const _Seat({required this.label, this.price, this.taken = false});
+  const _Seat({
+    required this.label,
+    this.price,
+    this.taken = false,
+    this.selected = false,
+  });
 
   final String label;
   final String? price;
   final bool taken;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -284,7 +832,12 @@ class _Seat extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: taken ? const Color(0xFFF0F0F0) : Colors.white,
-        border: taken ? null : Border.all(color: AppColors.border),
+        border: taken
+            ? null
+            : Border.all(
+                color: selected ? AppColors.ink : AppColors.border,
+                width: selected ? 2 : 1,
+              ),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(

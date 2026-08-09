@@ -140,14 +140,17 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextFormField).first, '20');
-    await tester.enterText(find.byType(TextFormField).last, 'English');
+    await tester.tap(find.byType(DropdownButtonFormField<String>).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('English').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pump();
 
     expect(find.text('Add a profile photo to continue.'), findsOneWidget);
   });
 
-  testWidgets('typed language saves and profile setup completes', (
+  testWidgets('selected spoken language saves and profile setup completes', (
     tester,
   ) async {
     final repository = _MemoryProfileRepository(
@@ -179,11 +182,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextFormField).last, 'Uzbek');
+    await tester.tap(find.byType(DropdownButtonFormField<String>).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Spanish').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pumpAndSettle();
 
-    expect(repository.profile?.language, 'Uzbek');
+    expect(repository.profile?.language, 'Spanish');
     expect(find.text('Profile saved'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });

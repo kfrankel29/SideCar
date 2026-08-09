@@ -260,6 +260,17 @@ class _QaVerificationRepository implements VerificationRepository {
   }) async {}
 
   @override
+  Future<void> verifyInsuranceForTesting() async {
+    summary = VerificationSummary(
+      identity: summary.identity,
+      insurance: VerificationStatus.verified,
+      manualInsuranceSubmitted: summary.manualInsuranceSubmitted,
+      vehicle: summary.vehicle,
+      lastError: summary.lastError,
+    );
+  }
+
+  @override
   Future<String> uploadVehiclePhoto({
     required Uint8List bytes,
     required String contentType,

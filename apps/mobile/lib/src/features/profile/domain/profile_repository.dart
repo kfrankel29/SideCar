@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 
 abstract interface class ProfileRepository {
@@ -19,5 +20,6 @@ final profileRepositoryProvider = Provider<ProfileRepository>(
 );
 
 final currentProfileProvider = StreamProvider<UserProfile?>((ref) {
+  ref.watch(authStateProvider);
   return ref.watch(profileRepositoryProvider).watchCurrentProfile();
 });

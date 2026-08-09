@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/core/widgets/app_notice.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
@@ -70,12 +71,8 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
         _resetToWelcome();
       }
     } on Object {
-      try {
-        await ref.read(authRepositoryProvider).signOut();
-      } on Object {
-        // The server validation failed, so the app still returns to sign-in.
-      }
-      _resetToWelcome();
+      // Keep the persisted session during transient network failures. A null
+      // validation result or deleted server profile is handled above.
     } finally {
       _isValidatingSession = false;
     }
@@ -91,6 +88,7 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
 
     return MaterialApp.router(
       title: 'SideCar',
+      scaffoldMessengerKey: sideCarScaffoldMessengerKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       routerConfig: router,

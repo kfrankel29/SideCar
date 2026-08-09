@@ -219,6 +219,11 @@ class _IdentityVerificationScreenState
       final uri = await ref
           .read(verificationRepositoryProvider)
           .createIdentityVerificationSession();
+      if (uri == null) {
+        ref.invalidate(currentVerificationProvider);
+        if (mounted && context.canPop()) context.pop();
+        return;
+      }
       final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!opened) {
         throw const AppFailure('We could not open Stripe verification.');
@@ -325,6 +330,11 @@ class _DriverLicenseUploadScreenState
       final uri = await ref
           .read(verificationRepositoryProvider)
           .createIdentityVerificationSession();
+      if (uri == null) {
+        ref.invalidate(currentVerificationProvider);
+        if (mounted && context.canPop()) context.pop();
+        return;
+      }
       final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!opened) {
         throw const AppFailure('We could not open Stripe verification.');
@@ -714,11 +724,42 @@ class _VehicleProfileScreenState extends ConsumerState<VehicleProfileScreen> {
   }
 }
 
-class InsuranceVerificationScreen extends ConsumerWidget {
+class InsuranceVerificationScreen extends ConsumerStatefulWidget {
   const InsuranceVerificationScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InsuranceVerificationScreen> createState() =>
+      _InsuranceVerificationScreenState();
+}
+
+class _InsuranceVerificationScreenState
+    extends ConsumerState<InsuranceVerificationScreen> {
+  bool _testVerifying = false;
+  String? _error;
+
+  Future<void> _verifyForTesting() async {
+    setState(() {
+      _testVerifying = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(verificationRepositoryProvider)
+          .verifyInsuranceForTesting();
+      ref.invalidate(currentVerificationProvider);
+    } on AppFailure catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } on Object {
+      if (mounted) {
+        setState(() => _error = 'We could not verify insurance for testing.');
+      }
+    } finally {
+      if (mounted) setState(() => _testVerifying = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final summary =
         ref.watch(currentVerificationProvider).value ??
         const VerificationSummary();
@@ -766,6 +807,23 @@ class InsuranceVerificationScreen extends ConsumerWidget {
                 ? AppColors.success
                 : AppColors.warning,
           ),
+          if (!summary.insuranceComplete) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: AppHaptics.wrap(
+                  _testVerifying ? null : _verifyForTesting,
+                ),
+                icon: const Icon(Icons.science_outlined, size: 18),
+                label: Text(
+                  _testVerifying
+                      ? 'Verifying test insurance…'
+                      : 'Test verify insurance',
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Text(
             summary.manualInsuranceSubmitted
@@ -773,6 +831,7 @@ class InsuranceVerificationScreen extends ConsumerWidget {
                 : 'If the automatic check cannot confirm your policy, upload a current insurance card for review.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
+          SideCarErrorText(_error),
         ],
       ),
     );

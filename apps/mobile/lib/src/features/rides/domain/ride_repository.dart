@@ -4,10 +4,12 @@ import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 abstract interface class RideRepository {
   Future<List<RidePlacePrediction>> searchPlaces(String query);
   Future<Ride> createRide(RideDraft draft);
+  Future<Ride> updateRide(RideUpdate update);
+  Future<void> cancelRide(String rideId);
   Future<List<Ride>> searchRides(RideSearchCriteria criteria);
-  Future<List<Ride>> listLeavingSoon();
+  Future<List<Ride>> listLeavingSoon({bool forceRefresh = false});
   Future<Ride> getRide(String rideId);
-  Future<List<Ride>> listMyRides();
+  Future<List<Ride>> listMyRides({bool forceRefresh = false});
 }
 
 final rideRepositoryProvider = Provider<RideRepository>(

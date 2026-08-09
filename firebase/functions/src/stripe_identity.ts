@@ -3,6 +3,26 @@ export type StripeIdentitySessionReference = {
   client_reference_id?: string | null;
 };
 
+export type StripeIdentityExistingSession = {
+  status?: string | null;
+  url?: string | null;
+};
+
+export type StripeIdentityExistingSessionOutcome =
+  | {kind: "verified"}
+  | {kind: "resume"; url: string}
+  | {kind: "create"};
+
+export function stripeIdentityExistingSessionOutcome(
+  session: StripeIdentityExistingSession,
+): StripeIdentityExistingSessionOutcome {
+  if (session.status === "verified") return {kind: "verified"};
+  if (typeof session.url === "string" && session.url.length > 0) {
+    return {kind: "resume", url: session.url};
+  }
+  return {kind: "create"};
+}
+
 export function stripeIdentityStatusForEvent(eventType: string): string {
   if (eventType.endsWith(".verified")) return "verified";
   if (eventType.endsWith(".requires_input")) return "requiresAction";

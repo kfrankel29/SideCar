@@ -9,6 +9,10 @@ import 'package:sidecar/src/features/auth/domain/account_user.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
+import 'package:sidecar/src/features/rides/domain/ride_models.dart';
+import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
+import 'package:sidecar/src/features/verification/domain/verification_models.dart';
+import 'package:sidecar/src/features/verification/domain/verification_repository.dart';
 
 void main() {
   const restoredUser = AccountUser(
@@ -114,8 +118,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1200));
     await tester.pumpAndSettle();
 
-    expect(find.text('Your profile is ready'), findsOneWidget);
+    expect(find.text('Hey, Test'), findsOneWidget);
     expect(find.text('Welcome aboard, Test'), findsNothing);
+    expect(find.text('Your profile is ready'), findsNothing);
   });
 
   testWidgets('a completed profile can log out for account testing', (
@@ -130,6 +135,13 @@ void main() {
     await tester.pumpWidget(_testApp(auth, _MemoryProfileRepository(profile)));
     await tester.pump(const Duration(milliseconds: 1200));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ride-nav-4')));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Log out'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tester.tap(find.text('Log out'));
     await tester.pumpAndSettle();
 
@@ -153,7 +165,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(profiles.profile?.primaryRole, PrimaryRole.rider);
-    expect(find.text('Your profile is ready'), findsOneWidget);
+    expect(find.text('Hey, Test'), findsOneWidget);
+    expect(find.text('Your profile is ready'), findsNothing);
   });
 
   testWidgets('a deleted server profile is rechecked when the app resumes', (
@@ -193,9 +206,89 @@ Widget _testApp(AuthRepository auth, ProfileRepository profiles) {
       ),
       authRepositoryProvider.overrideWithValue(auth),
       profileRepositoryProvider.overrideWithValue(profiles),
+      rideRepositoryProvider.overrideWithValue(const _EmptyRideRepository()),
+      verificationRepositoryProvider.overrideWithValue(
+        const _MemoryVerificationRepository(),
+      ),
     ],
     child: const SideCarApp(),
   );
+}
+
+class _EmptyRideRepository implements RideRepository {
+  const _EmptyRideRepository();
+
+  @override
+  Future<void> cancelRide(String rideId) async {}
+
+  @override
+  Future<Ride> createRide(RideDraft draft) => throw UnimplementedError();
+
+  @override
+  Future<Ride> getRide(String rideId) => throw UnimplementedError();
+
+  @override
+  Future<List<Ride>> listLeavingSoon({bool forceRefresh = false}) async =>
+      const [];
+
+  @override
+  Future<List<Ride>> listMyRides({bool forceRefresh = false}) async => const [];
+
+  @override
+  Future<List<RidePlacePrediction>> searchPlaces(String query) async =>
+      const [];
+
+  @override
+  Future<List<Ride>> searchRides(RideSearchCriteria criteria) async => const [];
+
+  @override
+  Future<Ride> updateRide(RideUpdate update) => throw UnimplementedError();
+}
+
+class _MemoryVerificationRepository implements VerificationRepository {
+  const _MemoryVerificationRepository();
+
+  static const _summary = VerificationSummary(
+    identity: VerificationStatus.verified,
+    insurance: VerificationStatus.verified,
+    vehicle: VehicleProfile(
+      year: 2022,
+      make: 'Honda',
+      model: 'Civic',
+      color: 'Black',
+      licensePlate: 'TEST123',
+      photoUrl: 'https://example.com/car.jpg',
+    ),
+  );
+
+  @override
+  Future<VerificationSummary> loadCurrentVerification() async => _summary;
+
+  @override
+  Stream<VerificationSummary> watchCurrentVerification() =>
+      Stream.value(_summary);
+
+  @override
+  Future<Uri> createIdentityVerificationSession() => throw UnimplementedError();
+
+  @override
+  Future<void> saveVehicle(VehicleProfile vehicle) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> submitInsuranceDocument({
+    required Uint8List bytes,
+    required String contentType,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<String> uploadVehiclePhoto({
+    required Uint8List bytes,
+    required String contentType,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> verifyInsuranceForTesting() => throw UnimplementedError();
 }
 
 class _SessionAuthRepository implements AuthRepository {

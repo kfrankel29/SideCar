@@ -1,13 +1,18 @@
 import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
-import {getRemoteConfig} from "firebase-admin/remote-config";
+import {
+  getRemoteConfig,
+  type RemoteConfigTemplate,
+} from "firebase-admin/remote-config";
 import {defineSecret} from "firebase-functions/params";
+import {logger} from "firebase-functions";
 import {HttpsError, onCall, onRequest} from "firebase-functions/v2/https";
 import {
   PricingMode,
   calculateRidePricing,
   luggageRank,
+  matchesDriverLanguage,
   normalizeSearchText,
 } from "./ride_pricing.js";
 import {
@@ -16,14 +21,25 @@ import {
   routePointAllowed,
 } from "./ride_routing.js";
 import {weeklyDepartures} from "./ride_recurrence.js";
+import {compareClosestDepartures} from "./ride_search.js";
+import {publicSeatInventory, rideIntervalsOverlap} from "./ride_management.js";
+import {preferredDriverPhotoUrl} from "./ride_driver_profile.js";
+import {AsyncTtlCache} from "./async_ttl_cache.js";
+import {
+  compactEncodedPolyline,
+  googleStaticMapUrl,
+  rideMapPreviewUrl,
+} from "./ride_map_preview.js";
 
 if (getApps().length === 0) initializeApp();
 
 const db = getFirestore();
 const auth = getAuth();
 const googleMapsApiKey = defineSecret("GOOGLE_MAPS_API_KEY");
+const googleStaticMapsApiKey = defineSecret("GOOGLE_STATIC_MAPS_API_KEY");
 const region = "us-central1";
 const maxSearchResults = 100;
+const remoteTemplateCache = new AsyncTtlCache<RemoteConfigTemplate>(60_000);
 
 type Json = Record<string, unknown>;
 
@@ -89,17 +105,23 @@ function timestamp(value: unknown, field: string): Timestamp {
   return Timestamp.fromMillis(millis);
 }
 
-async function requireVerifiedUser(uid: string, driver = false): Promise<Json> {
-  const [userRecord, profileSnapshot, verificationSnapshot, vehicleSnapshot] =
-    await Promise.all([
-      auth.getUser(uid),
-      db.collection("users").doc(uid).get(),
-      db.collection("users").doc(uid).collection("verifications").doc("current").get(),
-      db.collection("users").doc(uid).collection("vehicles").doc("primary").get(),
-    ]);
-  const profile = profileSnapshot.data();
-  const verification = verificationSnapshot.data();
-  const vehicle = vehicleSnapshot.data();
+async function requireVerifiedUser(
+  uid: string,
+  driver = false,
+): Promise<Json> {
+  const userReference = db.collection("users").doc(uid);
+  const references = [
+    userReference,
+    userReference.collection("verifications").doc("current"),
+    ...(driver ? [userReference.collection("vehicles").doc("primary")] : []),
+  ];
+  const [userRecord, snapshots] = await Promise.all([
+    auth.getUser(uid),
+    db.getAll(...references),
+  ]);
+  const profile = snapshots[0]?.data();
+  const verification = snapshots[1]?.data();
+  const vehicle = snapshots[2]?.data();
   const emailVerified = userRecord.emailVerified ||
     userRecord.customClaims?.schoolEmailVerified === true;
   if (!emailVerified || profile?.profileComplete !== true ||
@@ -121,7 +143,9 @@ async function requireVerifiedUser(uid: string, driver = false): Promise<Json> {
 
 async function remoteValue(key: string): Promise<string> {
   try {
-    const template = await getRemoteConfig().getTemplate();
+    const template = await remoteTemplateCache.get(
+      () => getRemoteConfig().getTemplate(),
+    );
     const value = template.parameters[key]?.defaultValue;
     if (value && "value" in value && value.value.trim()) return value.value.trim();
   } catch {
@@ -264,14 +288,25 @@ async function routeDetails(originPlaceId: string, destinationPlaceId: string): 
   };
 }
 
-function publicRide(id: string, data: Json): Json {
+function publicRide(id: string, data: Json, currentDriverPhotoUrl = ""): Json {
   const departureAt = data.departureAt;
+  const {seatsTotal, seatsAvailable, bookedSeats} = publicSeatInventory(
+    data.status,
+    data.seatsTotal,
+    data.seatsAvailable,
+    data.bookedSeats,
+  );
   return {
     id,
     driverId: data.driverId,
     driverName: data.driverName,
     driverInitials: data.driverInitials,
+    driverPhotoUrl: preferredDriverPhotoUrl(
+      currentDriverPhotoUrl,
+      data.driverPhotoUrl,
+    ),
     driverGender: data.driverGender,
+    driverLanguage: data.driverLanguage ?? "",
     driverRating: data.driverRating ?? 0,
     driverTrips: data.driverTrips ?? 0,
     vehicle: data.vehicle,
@@ -280,19 +315,50 @@ function publicRide(id: string, data: Json): Json {
     departureAt: departureAt instanceof Timestamp ? departureAt.toDate().toISOString() : null,
     distanceMiles: data.distanceMiles,
     durationSeconds: data.durationSeconds,
-    seatsTotal: data.seatsTotal,
-    seatsAvailable: data.seatsAvailable,
+    seatsTotal,
+    seatsAvailable,
+    bookedSeats,
     pricePerSeatCents: data.pricePerSeatCents,
     maximumPriceCents: data.maximumPriceCents,
     luggageAllowance: data.luggageAllowance,
     genderRestriction: data.genderRestriction,
     status: data.status,
     shareUrl: data.shareUrl,
+    mapPreviewUrl: rideMapPreviewUrl(
+      id,
+      typeof data.encodedPolyline === "string" ? data.encodedPolyline : "",
+    ),
     encodedPolyline: data.encodedPolyline,
     repeatWeekly: data.repeatWeekly === true,
     recurrenceId: data.recurrenceId ?? "",
     verified: true,
   };
+}
+
+async function publicRides(
+  records: Array<{id: string; data: Json}>,
+): Promise<Json[]> {
+  const driverIds = [...new Set(records
+    .map(({data}) => typeof data.driverId === "string" ? data.driverId : "")
+    .filter(Boolean))];
+  if (driverIds.length === 0) {
+    return records.map(({id, data}) => publicRide(id, data));
+  }
+  const profileSnapshots = await db.getAll(
+    ...driverIds.map((driverId) => db.collection("users").doc(driverId)),
+  );
+  const photoUrls = new Map<string, string>();
+  profileSnapshots.forEach((snapshot) => {
+    const photoUrl = snapshot.data()?.photoUrl;
+    if (typeof photoUrl === "string" && photoUrl.trim()) {
+      photoUrls.set(snapshot.id, photoUrl.trim());
+    }
+  });
+  return records.map(({id, data}) => publicRide(
+    id,
+    data,
+    photoUrls.get(String(data.driverId ?? "")) ?? "",
+  ));
 }
 
 async function blockedDriverIds(
@@ -403,7 +469,7 @@ export const createRide = onCall(
       "Rider restriction",
       ["any", "women_only", "men_only"] as const,
     );
-    const repeatWeekly = data.repeatWeekly === true;
+    const repeatWeekly = false;
 
     const [
       origin,
@@ -411,22 +477,13 @@ export const createRide = onCall(
       route,
       mileageRate,
       pricingModeValue,
-      recurrenceOccurrences,
     ] = await Promise.all([
       placeDetails(originPlaceId),
       placeDetails(destinationPlaceId),
       routeDetails(originPlaceId, destinationPlaceId),
       remoteNumber("irs_mileage_rate"),
       remoteString("pricing_mode"),
-      repeatWeekly ? remoteNumber("recurring_ride_occurrences") : Promise.resolve(1),
     ]);
-    if (!Number.isInteger(recurrenceOccurrences) ||
-        recurrenceOccurrences < 1 || recurrenceOccurrences > 26) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Recurring ride configuration is invalid.",
-      );
-    }
     const pricingMode: PricingMode = pricingModeValue === "platform_calculated" ?
       "platform_calculated" : "driver_sets_under_cap";
     let pricing;
@@ -450,7 +507,7 @@ export const createRide = onCall(
 
     const departures = weeklyDepartures(
       departureAt.toDate(),
-      recurrenceOccurrences,
+      1,
     );
     const references = departures.map(() => db.collection("rides").doc());
     const reference = references[0]!;
@@ -462,7 +519,9 @@ export const createRide = onCall(
       driverId: request.auth.uid,
       driverName,
       driverInitials: initials(profile),
+      driverPhotoUrl: String(profile.photoUrl ?? "").trim(),
       driverGender: normalizeSearchText(String(profile.gender ?? "")),
+      driverLanguage: String(profile.language ?? "").trim(),
       driverRating: Number(profile.driverRating ?? 0),
       driverTrips: Number(profile.driverTrips ?? 0),
       vehicle: {
@@ -490,26 +549,108 @@ export const createRide = onCall(
       repeatWeekly,
       recurrenceId,
     };
-    const batch = db.batch();
-    departures.forEach((departure, index) => {
-      const occurrence = references[index]!;
-      const shareUrl = `${shareBase}${shareBase.includes("?") ? "&" : "?"}id=${occurrence.id}`;
-      batch.create(occurrence, {
-        ...baseRide,
-        departureAt: Timestamp.fromDate(departure),
-        recurrenceIndex: index,
-        shareUrl,
-        createdAt: FieldValue.serverTimestamp(),
+    const scheduleReference = db.collection("ride_schedules").doc(request.auth.uid);
+    await db.runTransaction(async (transaction) => {
+      await transaction.get(scheduleReference);
+      const existingRides = await transaction.get(
+        db.collection("rides")
+          .where("driverId", "==", request.auth!.uid)
+          .limit(200),
+      );
+      const overlaps = existingRides.docs.some((document) => {
+        const existing = document.data();
+        const existingDeparture = existing.departureAt;
+        if (existing.status !== "published" ||
+            !(existingDeparture instanceof Timestamp)) return false;
+        return departures.some((candidate) => rideIntervalsOverlap(
+          candidate.getTime(),
+          route.durationSeconds,
+          existingDeparture.toMillis(),
+          Number(existing.durationSeconds ?? 0),
+        ));
       });
+      if (overlaps) {
+        throw new HttpsError(
+          "already-exists",
+          "This ride overlaps another ride you already posted.",
+        );
+      }
+      departures.forEach((departure, index) => {
+        const occurrence = references[index]!;
+        const shareUrl = `${shareBase}${shareBase.includes("?") ? "&" : "?"}id=${occurrence.id}`;
+        transaction.create(occurrence, {
+          ...baseRide,
+          departureAt: Timestamp.fromDate(departure),
+          recurrenceIndex: index,
+          shareUrl,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      });
+      transaction.set(scheduleReference, {
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
     });
-    await batch.commit();
     const firstRide = {
       ...baseRide,
       departureAt,
       recurrenceIndex: 0,
       shareUrl: `${shareBase}${shareBase.includes("?") ? "&" : "?"}id=${reference.id}`,
     };
-    return {ride: publicRide(reference.id, firstRide)};
+    return {
+      ride: publicRide(
+        reference.id,
+        firstRide,
+        String(profile.photoUrl ?? "").trim(),
+      ),
+    };
+  },
+);
+
+export const updateRide = onCall(
+  {region, enforceAppCheck: true, maxInstances: 30},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
+    }
+    await requireVerifiedUser(request.auth.uid, true);
+    const rideId = stringValue(object(request.data).rideId, "Ride", 128);
+    const reference = db.collection("rides").doc(rideId);
+    const ride = (await reference.get()).data();
+    if (!ride || ride.driverId !== request.auth.uid) {
+      throw new HttpsError("permission-denied", "You can only edit your own ride.");
+    }
+    throw new HttpsError(
+      "failed-precondition",
+      "Published rides cannot be edited. Cancel this ride and post a new one.",
+    );
+  },
+);
+
+export const cancelRide = onCall(
+  {region, enforceAppCheck: true, maxInstances: 30},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
+    }
+    await requireVerifiedUser(request.auth.uid, true);
+    const rideId = stringValue(object(request.data).rideId, "Ride", 128);
+    const reference = db.collection("rides").doc(rideId);
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(reference);
+      const ride = snapshot.data();
+      if (!ride || ride.driverId !== request.auth?.uid) {
+        throw new HttpsError("permission-denied", "You can only cancel your own ride.");
+      }
+      if (ride.status !== "published") return;
+      transaction.update(reference, {
+        status: "cancelled",
+        seatsAvailable: Number(ride.seatsTotal ?? 0),
+        bookedSeats: 0,
+        cancelledAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+    return {rideId, status: "cancelled"};
   },
 );
 
@@ -536,6 +677,9 @@ export const searchRides = onCall(
     const pickupPlaceId = stringValue(data.pickupPlaceId, "Pickup area", 300);
     const dropoffPlaceId = stringValue(data.dropoffPlaceId, "Drop-off area", 300);
     const driverGender = choice(data.driverGender ?? "any", "Driver gender", ["any", "women", "men"] as const);
+    const driverLanguage = typeof data.driverLanguage === "string" &&
+      data.driverLanguage.trim() ?
+      stringValue(data.driverLanguage, "Driver language", 80) : "";
     const luggageRequired = choice(
       data.luggageRequired ?? "backpack",
       "Luggage",
@@ -560,12 +704,10 @@ export const searchRides = onCall(
       .orderBy("departureAt")
       .limit(maxSearchResults)
       .get();
-    const blocked = await blockedDriverIds(
-      request.auth.uid,
-      snapshot.docs.map((document) => String(document.data().driverId ?? "")),
-    );
-    const rides = snapshot.docs
-      .filter((document) => {
+    const documentMatches = (
+      document: (typeof snapshot.docs)[number],
+      blocked: Set<string>,
+    ): boolean => {
         const ride = document.data();
         const driverId = ride.driverId;
         if (typeof driverId !== "string" || driverId === request.auth?.uid || blocked.has(driverId)) return false;
@@ -595,14 +737,70 @@ export const searchRides = onCall(
           if (driverGender === "women" && normalizedGender !== "female" && normalizedGender !== "woman") return false;
           if (driverGender === "men" && normalizedGender !== "male" && normalizedGender !== "man") return false;
         }
+        if (!matchesDriverLanguage(ride.driverLanguage, driverLanguage)) return false;
         if (luggageRank(String(ride.luggageAllowance ?? "")) < luggageRank(luggageRequired)) return false;
         if (Number(ride.driverRating ?? 0) < minimumRating) return false;
         return Number(ride.seatsAvailable ?? 0) > 0;
-      })
-      .map((document) => publicRide(document.id, document.data()));
+      };
+    let candidateDocuments = snapshot.docs;
+    let blocked = await blockedDriverIds(
+      request.auth.uid,
+      candidateDocuments.map((document) =>
+        String(document.data().driverId ?? "")),
+    );
+    let matchingDocuments = candidateDocuments.filter((document) =>
+      documentMatches(document, blocked));
+    let showingClosest = false;
+
+    if (matchingDocuments.length === 0) {
+      showingClosest = true;
+      const searchRadius = 30 * 24 * 60 * 60_000;
+      const fallbackStart = Timestamp.fromMillis(
+        Math.max(Date.now(), startAt.toMillis() - searchRadius),
+      );
+      const fallbackEnd = Timestamp.fromMillis(endAt.toMillis() + searchRadius);
+      const fallbackSnapshot = await db.collection("rides")
+        .where("status", "==", "published")
+        .where("departureAt", ">=", fallbackStart)
+        .where("departureAt", "<", fallbackEnd)
+        .orderBy("departureAt")
+        .limit(maxSearchResults)
+        .get();
+      candidateDocuments = fallbackSnapshot.docs;
+      blocked = await blockedDriverIds(
+        request.auth.uid,
+        candidateDocuments.map((document) =>
+          String(document.data().driverId ?? "")),
+      );
+      matchingDocuments = candidateDocuments
+        .filter((document) => documentMatches(document, blocked))
+        .sort((left, right) => {
+          const leftDeparture = (left.data().departureAt as Timestamp).toMillis();
+          const rightDeparture = (right.data().departureAt as Timestamp).toMillis();
+          return compareClosestDepartures(
+            leftDeparture,
+            rightDeparture,
+            startAt.toMillis(),
+            endAt.toMillis(),
+          );
+        });
+    }
+
+    const rides = await publicRides(matchingDocuments.map((document) => ({
+      id: document.id,
+      data: document.data(),
+    })));
     rides.sort((left, right) => {
       if (sort === "top_rated") return Number(right.driverRating) - Number(left.driverRating);
       if (sort === "most_seats") return Number(right.seatsAvailable) - Number(left.seatsAvailable);
+      if (showingClosest) {
+        return compareClosestDepartures(
+          Date.parse(String(left.departureAt)),
+          Date.parse(String(right.departureAt)),
+          startAt.toMillis(),
+          endAt.toMillis(),
+        );
+      }
       return Date.parse(String(left.departureAt)) - Date.parse(String(right.departureAt));
     });
     return {rides};
@@ -624,7 +822,7 @@ export const listLeavingSoon = onCall(
       request.auth.uid,
       snapshot.docs.map((document) => String(document.data().driverId ?? "")),
     );
-    const rides = snapshot.docs
+    const rideDocuments = snapshot.docs
       .filter((document) => {
         const driverId = document.data().driverId;
         return typeof driverId === "string" &&
@@ -632,8 +830,11 @@ export const listLeavingSoon = onCall(
           !blocked.has(driverId) &&
           Number(document.data().seatsAvailable ?? 0) > 0;
       })
-      .slice(0, 6)
-      .map((document) => publicRide(document.id, document.data()));
+      .slice(0, 6);
+    const rides = await publicRides(rideDocuments.map((document) => ({
+      id: document.id,
+      data: document.data(),
+    })));
     return {rides};
   },
 );
@@ -658,7 +859,8 @@ export const getRide = onCall(
         throw new HttpsError("not-found", "That ride is no longer available.");
       }
     }
-    return {ride: publicRide(snapshot.id, ride)};
+    const [publicResult] = await publicRides([{id: snapshot.id, data: ride}]);
+    return {ride: publicResult};
   },
 );
 
@@ -672,7 +874,100 @@ export const listMyRides = onCall(
       .orderBy("departureAt")
       .limit(100)
       .get();
-    return {rides: snapshot.docs.map((document) => publicRide(document.id, document.data()))};
+    return {
+      rides: await publicRides(snapshot.docs.map((document) => ({
+        id: document.id,
+        data: document.data(),
+      }))),
+    };
+  },
+);
+
+export const rideMapPreview = onRequest(
+  {
+    region,
+    secrets: [googleStaticMapsApiKey],
+    maxInstances: 30,
+    timeoutSeconds: 20,
+  },
+  async (request, response) => {
+    if (request.method !== "GET") {
+      response.status(405).send("Method not allowed");
+      return;
+    }
+    const rideId = typeof request.query.id === "string" ?
+      request.query.id.trim() : "";
+    if (!rideId || rideId.length > 128) {
+      response.status(404).send("Ride not found");
+      return;
+    }
+    const snapshot = await db.collection("rides").doc(rideId).get();
+    const ride = snapshot.data();
+    if (!ride || ride.status !== "published") {
+      response.status(404).send("Ride not found");
+      return;
+    }
+    const storedPolyline = typeof ride.encodedPolyline === "string" ?
+      ride.encodedPolyline : "";
+    const encodedPolyline = compactEncodedPolyline(storedPolyline);
+    if (!encodedPolyline) {
+      response.status(422).send("Route preview unavailable");
+      return;
+    }
+    const origin = object(ride.origin);
+    const destination = object(ride.destination);
+    const originLatitude = Number(origin.latitude);
+    const originLongitude = Number(origin.longitude);
+    const destinationLatitude = Number(destination.latitude);
+    const destinationLongitude = Number(destination.longitude);
+    if (![originLatitude, originLongitude, destinationLatitude, destinationLongitude]
+      .every(Number.isFinite)) {
+      response.status(422).send("Route preview unavailable");
+      return;
+    }
+
+    const mapUrl = googleStaticMapUrl({
+      apiKey: googleStaticMapsApiKey.value(),
+      encodedPolyline,
+      origin: {latitude: originLatitude, longitude: originLongitude},
+      destination: {
+        latitude: destinationLatitude,
+        longitude: destinationLongitude,
+      },
+    });
+    try {
+      const mapResponse = await fetch(mapUrl, {
+        signal: AbortSignal.timeout(12_000),
+      });
+      const contentType = mapResponse.headers.get("content-type") ?? "";
+      if (!mapResponse.ok || !contentType.startsWith("image/")) {
+        const providerMessage = (await mapResponse.text())
+          .replaceAll(googleStaticMapsApiKey.value(), "[redacted]")
+          .slice(0, 300);
+        logger.warn("Ride map provider response was unsuccessful.", {
+          rideId,
+          status: mapResponse.status,
+          contentType,
+          providerMessage,
+        });
+        response.status(502).send("Route preview unavailable");
+        return;
+      }
+      const image = Buffer.from(await mapResponse.arrayBuffer());
+      if (image.length === 0 || image.length > 4_000_000) {
+        response.status(502).send("Route preview unavailable");
+        return;
+      }
+      response.set("Cache-Control", "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400");
+      response.set("Content-Type", contentType);
+      response.status(200).send(image);
+    } catch (error) {
+      logger.warn("Ride map provider request failed.", {
+        rideId,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+      response.status(502).send("Route preview unavailable");
+    }
   },
 );
 

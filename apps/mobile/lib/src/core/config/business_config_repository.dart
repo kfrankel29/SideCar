@@ -43,11 +43,11 @@ class FirebaseBusinessConfigRepository implements BusinessConfigRepository {
   static const _displayFallbacks = <String, Object>{
     RemoteConfigKeys.configVersion: 'local-default',
     RemoteConfigKeys.serviceFeeType: 'percentage',
-    RemoteConfigKeys.serviceFeeValue: 10.0,
+    RemoteConfigKeys.serviceFeeValue: 8.0,
     RemoteConfigKeys.irsMileageRate: 0.0,
     RemoteConfigKeys.pricingMode: 'driver_sets_under_cap',
     RemoteConfigKeys.refundRules:
-        '[{"minimumHoursBeforeTrip":168,"riderRefundPercentage":100,"platformPercentage":0,"driverPercentage":0},{"minimumHoursBeforeTrip":1,"riderRefundPercentage":50,"platformPercentage":10,"driverPercentage":40},{"minimumHoursBeforeTrip":0,"riderRefundPercentage":0,"platformPercentage":10,"driverPercentage":90}]',
+        '[{"minimumHoursBeforeTrip":168,"riderRefundPercentage":100,"platformPercentage":0,"driverPercentage":0},{"minimumHoursBeforeTrip":24,"riderRefundPercentage":50,"platformPercentage":8,"driverPercentage":42},{"minimumHoursBeforeTrip":0,"riderRefundPercentage":0,"platformPercentage":8,"driverPercentage":92}]',
     RemoteConfigKeys.paymentExpirationHours: 24,
     RemoteConfigKeys.tripAutoCompleteHours: 48,
     RemoteConfigKeys.allowedSchoolDomains: '["ucsb.edu"]',
@@ -185,7 +185,7 @@ class MemoryBusinessConfigRepository implements BusinessConfigRepository {
 BusinessConfig localDisplayConfig() {
   return BusinessConfig(
     serviceFeeType: ServiceFeeType.percentage,
-    serviceFeeValue: 10,
+    serviceFeeValue: 8,
     irsMileageRate: 0,
     pricingMode: PricingMode.driverSetsUnderCap,
     paymentExpirationHours: 24,
@@ -196,6 +196,18 @@ BusinessConfig localDisplayConfig() {
         riderRefundPercentage: 100,
         platformPercentage: 0,
         driverPercentage: 0,
+      ),
+      RefundRule(
+        minimumHoursBeforeTrip: 24,
+        riderRefundPercentage: 50,
+        platformPercentage: 8,
+        driverPercentage: 42,
+      ),
+      RefundRule(
+        minimumHoursBeforeTrip: 0,
+        riderRefundPercentage: 0,
+        platformPercentage: 8,
+        driverPercentage: 92,
       ),
     ],
     allowedSchoolDomains: const ['ucsb.edu'],

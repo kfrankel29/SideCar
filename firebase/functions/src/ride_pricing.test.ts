@@ -4,6 +4,7 @@ import {
   calculateRidePricing,
   locationMatches,
   luggageRank,
+  matchesDriverLanguage,
 } from "./ride_pricing.js";
 
 test("calculates and floors the server price cap", () => {
@@ -48,4 +49,10 @@ test("location and luggage filters normalize user input", () => {
   assert.equal(locationMatches("UCSB / Isla Vista, California", "isla vista"), true);
   assert.equal(locationMatches("Palo Alto — Caltrain", "San Jose"), false);
   assert.ok(luggageRank("two_plus_bags") > luggageRank("one_suitcase"));
+});
+
+test("spoken language filter is optional and case insensitive", () => {
+  assert.equal(matchesDriverLanguage("English", "english"), true);
+  assert.equal(matchesDriverLanguage("Spanish", "English"), false);
+  assert.equal(matchesDriverLanguage(undefined, ""), true);
 });

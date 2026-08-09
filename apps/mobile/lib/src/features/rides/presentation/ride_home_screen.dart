@@ -20,13 +20,13 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
   Future<List<Ride>>? _rides;
   PrimaryRole? _loadedRole;
 
-  void _ensureLoad(PrimaryRole role) {
-    if (_rides != null && _loadedRole == role) return;
+  void _ensureLoad(PrimaryRole role, {bool forceRefresh = false}) {
+    if (!forceRefresh && _rides != null && _loadedRole == role) return;
     _loadedRole = role;
     final repository = ref.read(rideRepositoryProvider);
     _rides = role == PrimaryRole.driver
-        ? repository.listMyRides()
-        : repository.listLeavingSoon();
+        ? repository.listMyRides(forceRefresh: forceRefresh)
+        : repository.listLeavingSoon(forceRefresh: forceRefresh);
   }
 
   @override
@@ -35,12 +35,10 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
     final role = profile?.primaryRole ?? PrimaryRole.rider;
     _ensureLoad(role);
     return RidePageScaffold(
-      role: role,
-      navigationIndex: 0,
       body: RefreshIndicator(
         onRefresh: () async {
           setState(() => _rides = null);
-          _ensureLoad(role);
+          _ensureLoad(role, forceRefresh: true);
           await _rides;
         },
         child: ListView(
@@ -54,13 +52,26 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
                     style: Theme.of(context).textTheme.headlineLarge,
                   ),
                 ),
-                RideAvatar(initials: _initials(profile), radius: 22),
+                Semantics(
+                  button: true,
+                  label: 'Open profile',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: () => context.go(AppRoutes.account),
+                    child: RideAvatar(
+                      initials: _initials(profile),
+                      photoUrl: profile?.photoUrl ?? '',
+                      radius: 22,
+                    ),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 18),
             if (role == PrimaryRole.driver)
               _DriverHome(
                 rides: _rides!,
+                profile: profile,
                 onRetry: () => setState(() => _rides = null),
               )
             else
@@ -113,49 +124,24 @@ class _RiderHome extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 14),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
+        const SizedBox(height: 20),
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => context.push(AppRoutes.leavingSoon),
           child: Row(
             children: [
-              RideChoiceChip(
-                label: 'Home for break',
-                selected: true,
-                compact: true,
-                onTap: () => context.go(AppRoutes.searchRides),
+              Expanded(
+                child: Text(
+                  'Leaving soon',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
-              const SizedBox(width: 8),
-              RideChoiceChip(
-                label: 'This weekend',
-                selected: false,
-                compact: true,
-                onTap: () => context.go(AppRoutes.searchRides),
-              ),
-              const SizedBox(width: 8),
-              RideChoiceChip(
-                label: 'Women only',
-                selected: false,
-                compact: true,
-                onTap: () => context.go(AppRoutes.searchRides),
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Icon(Icons.chevron_right_rounded),
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 20),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Leaving soon',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-            IconButton(
-              tooltip: 'Search rides',
-              onPressed: () => context.go(AppRoutes.searchRides),
-              icon: const Icon(Icons.chevron_right_rounded),
-            ),
-          ],
         ),
         FutureBuilder<List<Ride>>(
           future: rides,
@@ -171,7 +157,11 @@ class _RiderHome extends StatelessWidget {
             }
             final now = DateTime.now();
             final values = (snapshot.data ?? const <Ride>[])
-                .where((ride) => !ride.departureAt.isBefore(now))
+                .where(
+                  (ride) =>
+                      ride.status == 'published' &&
+                      !ride.departureAt.isBefore(now),
+                )
                 .toList();
             if (values.isEmpty) {
               return const _EmptyRides(
@@ -198,9 +188,14 @@ class _RiderHome extends StatelessWidget {
 }
 
 class _DriverHome extends StatelessWidget {
-  const _DriverHome({required this.rides, required this.onRetry});
+  const _DriverHome({
+    required this.rides,
+    required this.profile,
+    required this.onRetry,
+  });
 
   final Future<List<Ride>> rides;
+  final UserProfile? profile;
   final VoidCallback onRetry;
 
   @override
@@ -220,23 +215,11 @@ class _DriverHome extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Post your next ride',
-                        style: Theme.of(
-                          context,
-                        ).textTheme.titleLarge?.copyWith(color: Colors.white),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        "Fill 3 seats = \$150 for a drive you're making",
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFFBEBEBE),
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    'Post your next ride',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleLarge?.copyWith(color: Colors.white),
                   ),
                 ),
                 Container(
@@ -256,11 +239,18 @@ class _DriverHome extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: _StatCard(value: '\$0', label: 'Earned this qtr'),
+              child: _StatCard(
+                value: _money(profile?.totalEarningsCents ?? 0),
+                label: 'Total Earnings',
+              ),
             ),
             const SizedBox(width: 10),
-            const Expanded(
-              child: _StatCard(value: '— · 0', label: 'Rating · trips'),
+            Expanded(
+              child: _StatCard(
+                value:
+                    '${(profile?.rating ?? 0) > 0 ? profile!.rating.toStringAsFixed(1) : '—'} · ${profile?.tripCount ?? 0}',
+                label: 'Rating · trips',
+              ),
             ),
           ],
         ),
@@ -310,6 +300,13 @@ class _DriverHome extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  String _money(int cents) {
+    final dollars = cents / 100;
+    return dollars == dollars.roundToDouble()
+        ? '\$${dollars.toStringAsFixed(0)}'
+        : '\$${dollars.toStringAsFixed(2)}';
   }
 }
 

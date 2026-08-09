@@ -7,6 +7,7 @@ import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/place_picker_sheet.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_widgets.dart';
+import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 
 class SearchRidesScreen extends StatefulWidget {
@@ -16,18 +17,123 @@ class SearchRidesScreen extends StatefulWidget {
   State<SearchRidesScreen> createState() => _SearchRidesScreenState();
 }
 
+class LeavingSoonScreen extends ConsumerStatefulWidget {
+  const LeavingSoonScreen({super.key});
+
+  @override
+  ConsumerState<LeavingSoonScreen> createState() => _LeavingSoonScreenState();
+}
+
+class _LeavingSoonScreenState extends ConsumerState<LeavingSoonScreen> {
+  late Future<List<Ride>> _rides;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  void _load({bool forceRefresh = false}) {
+    _rides = ref
+        .read(rideRepositoryProvider)
+        .listLeavingSoon(forceRefresh: forceRefresh);
+  }
+
+  Future<void> _refresh() async {
+    final request = ref
+        .read(rideRepositoryProvider)
+        .listLeavingSoon(forceRefresh: true);
+    setState(() => _rides = request);
+    await request;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 15, 24, 12),
+              child: _CenteredHeader(
+                title: 'Leaving soon',
+                subtitle: 'All available rides',
+                onBack: context.pop,
+              ),
+            ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _refresh,
+                child: FutureBuilder<List<Ride>>(
+                  future: _rides,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const _RefreshableResultsMessage(
+                        child: CircularProgressIndicator(),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return _RefreshableResultsMessage(
+                        child: TextButton(
+                          onPressed: () =>
+                              setState(() => _load(forceRefresh: true)),
+                          child: const Text('Could not load rides · Try again'),
+                        ),
+                      );
+                    }
+                    final rides = snapshot.data ?? const <Ride>[];
+                    if (rides.isEmpty) {
+                      return const _RefreshableResultsMessage(
+                        child: Text('No rides are leaving soon.'),
+                      );
+                    }
+                    return ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
+                      itemCount: rides.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) => RideCard(
+                        ride: rides[index],
+                        onTap: () => context.push('/rides/${rides[index].id}'),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RefreshableResultsMessage extends StatelessWidget {
+  const _RefreshableResultsMessage({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverFillRemaining(hasScrollBody: false, child: Center(child: child)),
+      ],
+    );
+  }
+}
+
 class _SearchRidesScreenState extends State<SearchRidesScreen> {
-  String _origin = 'UCSB / Isla Vista';
-  String _destination = 'San Mateo / Peninsula';
+  String _origin = '';
+  String _destination = '';
   RidePlacePrediction? _originPlace;
   RidePlacePrediction? _destinationPlace;
-  DateTime _date = DateUtils.dateOnly(
-    DateTime.now().add(const Duration(days: 1)),
-  );
-  DriverGenderFilter _gender = DriverGenderFilter.any;
-  LuggageAllowance _luggage = LuggageAllowance.oneSuitcase;
+  DateTime _date = DateUtils.dateOnly(DateTime.now());
+  DriverGenderFilter? _gender;
+  LuggageAllowance? _luggage;
+  String? _language;
   double _minimumRating = 0;
-  bool _afternoonOnly = false;
   String? _error;
 
   Future<void> _pickOrigin() async {
@@ -60,27 +166,65 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
     }
   }
 
+  Future<void> _pickDate() async {
+    final value = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateUtils.dateOnly(DateTime.now()),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (value != null && mounted) setState(() => _date = value);
+  }
+
   Future<void> _pickLuggage() async {
+    if (_luggage != null) {
+      setState(() => _luggage = null);
+      return;
+    }
     final value = await showModalBottomSheet<LuggageAllowance>(
       context: context,
-      showDragHandle: true,
+      useSafeArea: true,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            for (final option in LuggageAllowance.values)
+            for (final allowance in LuggageAllowance.values)
               ListTile(
-                title: Text(option.label),
-                trailing: option == _luggage
-                    ? const Icon(Icons.check_rounded)
-                    : null,
-                onTap: () => Navigator.pop(context, option),
+                title: Text(allowance.label),
+                onTap: () => Navigator.pop(context, allowance),
               ),
           ],
         ),
       ),
     );
     if (value != null && mounted) setState(() => _luggage = value);
+  }
+
+  Future<void> _pickLanguage() async {
+    if (_language != null) {
+      setState(() => _language = null);
+      return;
+    }
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.55,
+          child: ListView(
+            children: [
+              for (final language in supportedSpokenLanguages)
+                ListTile(
+                  title: Text(language),
+                  onTap: () => Navigator.pop(context, language),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (value != null && mounted) setState(() => _language = value);
   }
 
   void _search() {
@@ -91,10 +235,8 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
       return;
     }
     final day = DateTime(_date.year, _date.month, _date.day);
-    final start = _afternoonOnly ? day.add(const Duration(hours: 12)) : day;
-    final end = _afternoonOnly
-        ? day.add(const Duration(hours: 18))
-        : day.add(const Duration(days: 1));
+    final start = day;
+    final end = day.add(const Duration(days: 1));
     final criteria = RideSearchCriteria(
       originQuery: _originPlace!.mainText,
       destinationQuery: _destinationPlace!.mainText,
@@ -102,8 +244,9 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
       dropoffPlaceId: _destinationPlace!.placeId,
       startAt: start,
       endAt: end,
-      driverGender: _gender,
-      luggageRequired: _luggage,
+      driverGender: _gender ?? DriverGenderFilter.any,
+      driverLanguage: _language ?? '',
+      luggageRequired: _luggage ?? LuggageAllowance.backpack,
       minimumRating: _minimumRating,
     );
     context.push(AppRoutes.searchResults, extra: criteria);
@@ -112,21 +255,24 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
   @override
   Widget build(BuildContext context) {
     return RidePageScaffold(
-      role: PrimaryRole.rider,
-      navigationIndex: 1,
       body: Column(
         children: [
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
               children: [
-                _CenteredHeader(title: 'Find a ride', onBack: context.pop),
+                _CenteredHeader(
+                  title: 'Find a ride',
+                  onBack: () => context.go(AppRoutes.home),
+                ),
                 const SizedBox(height: 25),
                 SizedBox(
                   height: 140,
                   child: RideRouteCard(
                     origin: _origin,
                     destination: _destination,
+                    originPlaceholder: 'Pick Up Location',
+                    destinationPlaceholder: 'Drop Off Location',
                     onOriginTap: _pickOrigin,
                     onDestinationTap: _pickDestination,
                   ),
@@ -134,22 +280,12 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
                 const SizedBox(height: 27),
                 const _SectionLabel('When'),
                 const SizedBox(height: 11),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: List.generate(3, (index) {
-                      final date = DateUtils.dateOnly(
-                        DateTime.now().add(Duration(days: index + 1)),
-                      );
-                      return Padding(
-                        padding: EdgeInsets.only(right: index == 2 ? 0 : 8),
-                        child: RideChoiceChip(
-                          label: formatShortDate(date),
-                          selected: DateUtils.isSameDay(_date, date),
-                          onTap: () => setState(() => _date = date),
-                        ),
-                      );
-                    }),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: _pickDate,
+                    icon: const Icon(Icons.calendar_month_outlined, size: 18),
+                    label: Text(formatShortDate(_date)),
                   ),
                 ),
                 const SizedBox(height: 26),
@@ -164,9 +300,13 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
                         DriverGenderFilter.women,
                       ]) ...[
                         RideChoiceChip(
-                          label: value.label,
+                          label: value == DriverGenderFilter.women
+                              ? 'Women only'
+                              : value.label,
                           selected: _gender == value,
-                          onTap: () => setState(() => _gender = value),
+                          onTap: () => setState(
+                            () => _gender = _gender == value ? null : value,
+                          ),
                         ),
                         const SizedBox(width: 8),
                       ],
@@ -181,9 +321,15 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
                   child: Row(
                     children: [
                       RideChoiceChip(
-                        label: _luggage.label,
-                        selected: true,
+                        label: 'Luggage',
+                        selected: _luggage != null,
                         onTap: _pickLuggage,
+                      ),
+                      const SizedBox(width: 8),
+                      RideChoiceChip(
+                        label: 'Language',
+                        selected: _language != null,
+                        onTap: _pickLanguage,
                       ),
                       const SizedBox(width: 8),
                       RideChoiceChip(
@@ -193,13 +339,6 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
                           () =>
                               _minimumRating = _minimumRating == 4.8 ? 0 : 4.8,
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      RideChoiceChip(
-                        label: 'Afternoon',
-                        selected: _afternoonOnly,
-                        onTap: () =>
-                            setState(() => _afternoonOnly = !_afternoonOnly),
                       ),
                     ],
                   ),
@@ -242,6 +381,7 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
   late RideSearchCriteria _criteria;
   late Future<List<Ride>> _rides;
   int? _resultCount;
+  bool _showingClosest = false;
 
   @override
   void initState() {
@@ -252,19 +392,21 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
 
   void _load() {
     _resultCount = null;
+    _showingClosest = false;
     final request = ref.read(rideRepositoryProvider).searchRides(_criteria);
     _rides = request;
     request.then((rides) {
       if (!mounted || !identical(_rides, request)) return;
-      setState(() => _resultCount = rides.length);
+      final hasExactDate = rides.any(
+        (ride) =>
+            !ride.departureAt.isBefore(_criteria.startAt) &&
+            ride.departureAt.isBefore(_criteria.endAt),
+      );
+      setState(() {
+        _resultCount = rides.length;
+        _showingClosest = rides.isNotEmpty && !hasExactDate;
+      });
     }, onError: (_) {});
-  }
-
-  void _sort(RideSort sort) {
-    setState(() {
-      _criteria = _criteria.copyWith(sort: sort);
-      _load();
-    });
   }
 
   @override
@@ -274,33 +416,16 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+              padding: const EdgeInsets.fromLTRB(24, 15, 24, 0),
               child: _CenteredHeader(
                 title:
                     '${_criteria.originQuery} → ${_criteria.destinationQuery}',
                 subtitle:
-                    '${formatShortDate(_criteria.startAt)}${_resultCount == null ? '' : ' · $_resultCount ${_resultCount == 1 ? 'ride' : 'rides'}'}',
+                    '${_showingClosest ? 'Closest available' : formatShortDate(_criteria.startAt)}${_resultCount == null ? '' : ' · $_resultCount ${_resultCount == 1 ? 'ride' : 'rides'}'}',
                 onBack: context.pop,
               ),
             ),
-            const SizedBox(height: 18),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Row(
-                children: [
-                  for (final sort in RideSort.values) ...[
-                    RideChoiceChip(
-                      label: sort.label,
-                      selected: _criteria.sort == sort,
-                      onTap: () => _sort(sort),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
             Expanded(
               child: FutureBuilder<List<Ride>>(
                 future: _rides,
@@ -332,7 +457,6 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
                     separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (context, index) => RideCard(
                       ride: rides[index],
-                      selected: index == 1,
                       onTap: () => context.push('/rides/${rides[index].id}'),
                     ),
                   );
@@ -355,7 +479,7 @@ class _CenteredHeader extends StatelessWidget {
 
   final String title;
   final String? subtitle;
-  final VoidCallback onBack;
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -364,25 +488,37 @@ class _CenteredHeader extends StatelessWidget {
       child: Stack(
         alignment: Alignment.topCenter,
         children: [
-          Align(
-            alignment: Alignment.topLeft,
-            child: IconButton(
-              padding: EdgeInsets.zero,
-              onPressed: onBack,
-              icon: const Icon(Icons.chevron_left_rounded, size: 32),
-            ),
-          ),
-          Column(
-            children: [
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleLarge,
+          if (onBack != null)
+            Align(
+              alignment: Alignment.topLeft,
+              child: IconButton(
+                tooltip: 'Back',
+                padding: EdgeInsets.zero,
+                onPressed: onBack,
+                icon: const FinalDraftBackIcon(size: 24),
               ),
-              if (subtitle != null)
-                Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
-            ],
+            ),
+          Positioned.fill(
+            left: onBack == null ? 0 : 38,
+            right: onBack == null ? 0 : 38,
+            child: Column(
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+              ],
+            ),
           ),
         ],
       ),

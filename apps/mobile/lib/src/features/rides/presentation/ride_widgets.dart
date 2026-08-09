@@ -1,118 +1,19 @@
 import 'dart:math' as math;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
-import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
-import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 class RidePageScaffold extends StatelessWidget {
-  const RidePageScaffold({
-    required this.body,
-    required this.role,
-    required this.navigationIndex,
-    super.key,
-    this.showNavigation = true,
-  });
+  const RidePageScaffold({required this.body, super.key});
 
   final Widget body;
-  final PrimaryRole role;
-  final int navigationIndex;
-  final bool showNavigation;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(child: body),
-      bottomNavigationBar: showNavigation
-          ? RideBottomNavigation(role: role, selectedIndex: navigationIndex)
-          : null,
-    );
-  }
-}
-
-class RideBottomNavigation extends StatelessWidget {
-  const RideBottomNavigation({
-    required this.role,
-    required this.selectedIndex,
-    super.key,
-  });
-
-  final PrimaryRole role;
-  final int selectedIndex;
-
-  @override
-  Widget build(BuildContext context) {
-    const icons = [
-      Icons.home_outlined,
-      Icons.search_rounded,
-      Icons.view_carousel_outlined,
-      Icons.chat_bubble_outline_rounded,
-      Icons.person_outline_rounded,
-    ];
-    final driverIcons = [
-      Icons.home_outlined,
-      Icons.add_box_outlined,
-      Icons.view_carousel_outlined,
-      Icons.chat_bubble_outline_rounded,
-      Icons.person_outline_rounded,
-    ];
-    return SafeArea(
-      top: false,
-      child: Container(
-        height: 68,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: AppColors.softSurface)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: List.generate(5, (index) {
-            return IconButton(
-              key: ValueKey('ride-nav-$index'),
-              tooltip: _tooltip(index),
-              onPressed: AppHaptics.wrap(() => _open(context, index)),
-              icon: Icon(
-                role == PrimaryRole.driver ? driverIcons[index] : icons[index],
-                size: 25,
-                color: selectedIndex == index
-                    ? AppColors.ink
-                    : const Color(0xFFB0B0B0),
-              ),
-            );
-          }),
-        ),
-      ),
-    );
-  }
-
-  String _tooltip(int index) => switch (index) {
-    0 => 'Home',
-    1 => role == PrimaryRole.driver ? 'Post a ride' : 'Search rides',
-    2 => 'My rides',
-    3 => 'Messages',
-    _ => 'Profile',
-  };
-
-  void _open(BuildContext context, int index) {
-    switch (index) {
-      case 0:
-        context.go(AppRoutes.home);
-      case 1:
-        context.go(
-          role == PrimaryRole.driver
-              ? AppRoutes.postRide
-              : AppRoutes.searchRides,
-        );
-      case 2:
-        if (role == PrimaryRole.driver) context.go(AppRoutes.myRides);
-      case 4:
-        context.go(AppRoutes.profileGate);
-      case 3:
-        return;
-    }
+    return Scaffold(body: SafeArea(child: body));
   }
 }
 
@@ -182,7 +83,8 @@ class RideCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       onTap: onTap == null ? null : AppHaptics.wrap(onTap),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(13, 13, 14, 12),
+        constraints: const BoxConstraints(minHeight: 96),
+        padding: const EdgeInsets.fromLTRB(12, 11, 13, 10),
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(
@@ -194,8 +96,12 @@ class RideCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            RideAvatar(initials: ride.driverInitials),
-            const SizedBox(width: 12),
+            RideAvatar(
+              initials: ride.driverInitials,
+              photoUrl: ride.driverPhotoUrl,
+              radius: 19,
+            ),
+            const SizedBox(width: 11),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,32 +115,32 @@ class RideCard extends StatelessWidget {
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      const Icon(Icons.star_rounded, size: 17),
-                      const SizedBox(width: 3),
-                      Text(
-                        ride.driverRating == 0
-                            ? 'New'
-                            : ride.driverRating.toStringAsFixed(1),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
+                      if (ride.driverRating > 0) ...[
+                        const SizedBox(width: 8),
+                        const Text('★', style: TextStyle(fontSize: 15)),
+                        const SizedBox(width: 3),
+                        Text(
+                          ride.driverRating.toStringAsFixed(1),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
                     ],
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
                   Text(
                     'Dep ${formatTime(ride.departureAt)} · ${ride.vehicle.makeAndModel}',
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 7,
-                    runSpacing: 5,
-                    children: [
-                      const RideBadge(label: 'Verified', checked: true),
-                      if (ride.genderRestriction != RideGenderRestriction.any)
-                        RideBadge(label: ride.genderRestriction.label),
-                    ],
+                  Text(
+                    '${ride.origin.displayName} → ${ride.destination.displayName}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppColors.secondaryInk,
+                      fontWeight: FontWeight.w400,
+                    ),
                   ),
                 ],
               ),
@@ -243,6 +149,10 @@ class RideCard extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                if (ride.genderRestriction != RideGenderRestriction.any)
+                  RideBadge(label: ride.genderRestriction.label),
+                if (ride.genderRestriction != RideGenderRestriction.any)
+                  const SizedBox(height: 5),
                 Text(
                   ride.priceLabel,
                   style: Theme.of(context).textTheme.titleLarge,
@@ -262,19 +172,40 @@ class RideCard extends StatelessWidget {
 }
 
 class RideAvatar extends StatelessWidget {
-  const RideAvatar({required this.initials, super.key, this.radius = 23});
+  const RideAvatar({
+    required this.initials,
+    super.key,
+    this.radius = 23,
+    this.photoUrl = '',
+  });
 
   final String initials;
   final double radius;
+  final String photoUrl;
 
   @override
   Widget build(BuildContext context) {
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: const Color(0xFFE9E9E9),
+    final fallback = Center(
       child: Text(
         initials.isEmpty ? 'SC' : initials,
         style: Theme.of(context).textTheme.bodyMedium,
+      ),
+    );
+    return ClipOval(
+      child: ColoredBox(
+        color: const Color(0xFFE9E9E9),
+        child: SizedBox.square(
+          dimension: radius * 2,
+          child: photoUrl.isEmpty
+              ? fallback
+              : CachedNetworkImage(
+                  imageUrl: photoUrl,
+                  fit: BoxFit.cover,
+                  fadeInDuration: Duration.zero,
+                  placeholder: (_, _) => fallback,
+                  errorWidget: (_, _, _) => fallback,
+                ),
+        ),
       ),
     );
   }
@@ -320,18 +251,26 @@ class RideRouteCard extends StatelessWidget {
     super.key,
     this.originSubtitle,
     this.destinationSubtitle,
+    this.originPlaceholder = 'Choose pickup area',
+    this.destinationPlaceholder = 'Choose drop-off area',
     this.onTap,
     this.onOriginTap,
     this.onDestinationTap,
+    this.backgroundColor = Colors.white,
+    this.showBorder = true,
   });
 
   final String origin;
   final String destination;
   final String? originSubtitle;
   final String? destinationSubtitle;
+  final String originPlaceholder;
+  final String destinationPlaceholder;
   final VoidCallback? onTap;
   final VoidCallback? onOriginTap;
   final VoidCallback? onDestinationTap;
+  final Color backgroundColor;
+  final bool showBorder;
 
   @override
   Widget build(BuildContext context) {
@@ -341,8 +280,8 @@ class RideRouteCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: AppColors.border),
+          color: backgroundColor,
+          border: showBorder ? Border.all(color: AppColors.border) : null,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -385,6 +324,7 @@ class RideRouteCard extends StatelessWidget {
                         alignment: Alignment.centerLeft,
                         child: _RouteLocationText(
                           title: origin,
+                          placeholder: originPlaceholder,
                           subtitle: originSubtitle,
                         ),
                       ),
@@ -400,6 +340,7 @@ class RideRouteCard extends StatelessWidget {
                         alignment: Alignment.centerLeft,
                         child: _RouteLocationText(
                           title: destination,
+                          placeholder: destinationPlaceholder,
                           subtitle: destinationSubtitle,
                         ),
                       ),
@@ -416,9 +357,14 @@ class RideRouteCard extends StatelessWidget {
 }
 
 class _RouteLocationText extends StatelessWidget {
-  const _RouteLocationText({required this.title, this.subtitle});
+  const _RouteLocationText({
+    required this.title,
+    required this.placeholder,
+    this.subtitle,
+  });
 
   final String title;
+  final String placeholder;
   final String? subtitle;
 
   @override
@@ -428,10 +374,14 @@ class _RouteLocationText extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          title,
+          title.trim().isEmpty ? placeholder : title,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium,
+          style: title.trim().isEmpty
+              ? Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: AppColors.secondaryInk)
+              : Theme.of(context).textTheme.titleMedium,
         ),
         if (subtitle != null)
           Text(
@@ -446,17 +396,81 @@ class _RouteLocationText extends StatelessWidget {
 }
 
 class RideMapPreview extends StatelessWidget {
-  const RideMapPreview({super.key, this.encodedPolyline = ''});
+  const RideMapPreview({
+    super.key,
+    this.mapPreviewUrl = '',
+    this.topExtension = 0,
+  });
 
-  final String encodedPolyline;
+  final String mapPreviewUrl;
+  final double topExtension;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 155,
-      width: double.infinity,
-      child: CustomPaint(
-        painter: _MapPreviewPainter(encodedPolyline: encodedPolyline),
+    return RepaintBoundary(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final routeMapHeight = constraints.maxWidth * 252 / 640;
+          return SizedBox(
+            height: routeMapHeight + topExtension,
+            child: mapPreviewUrl.trim().isEmpty
+                ? const _MapUnavailablePlaceholder()
+                : Semantics(
+                    image: true,
+                    label: 'Ride route map',
+                    child: CachedNetworkImage(
+                      imageUrl: mapPreviewUrl,
+                      cacheKey: mapPreviewUrl,
+                      fit: BoxFit.cover,
+                      fadeInDuration: Duration.zero,
+                      fadeOutDuration: Duration.zero,
+                      useOldImageOnUrlChange: false,
+                      filterQuality: FilterQuality.low,
+                      memCacheWidth: 1280,
+                      memCacheHeight: 704,
+                      maxWidthDiskCache: 1280,
+                      maxHeightDiskCache: 704,
+                      placeholder: (_, _) => const _MapLoadingPlaceholder(),
+                      errorWidget: (_, _, _) =>
+                          const _MapUnavailablePlaceholder(),
+                    ),
+                  ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MapLoadingPlaceholder extends StatelessWidget {
+  const _MapLoadingPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xFFF5F6F7),
+      child: Center(
+        child: SizedBox.square(
+          dimension: 22,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+    );
+  }
+}
+
+class _MapUnavailablePlaceholder extends StatelessWidget {
+  const _MapUnavailablePlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: const Color(0xFFF5F6F7),
+      child: Center(
+        child: Text(
+          'Map unavailable',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
       ),
     );
   }
@@ -479,118 +493,6 @@ class _DottedLinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _MapPreviewPainter extends CustomPainter {
-  const _MapPreviewPainter({required this.encodedPolyline});
-
-  final String encodedPolyline;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final street = Paint()
-      ..color = const Color(0xFFF0F1F2)
-      ..strokeWidth = 6;
-    for (var y = 16.0; y < size.height; y += 35) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), street);
-    }
-    for (var x = 28.0; x < size.width; x += 64) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), street);
-    }
-    final route = Paint()
-      ..color = AppColors.ink
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke;
-    final points = _decodePolyline(encodedPolyline);
-    final projected = points.length > 1 ? _projectRoute(points, size) : null;
-    final path = projected == null
-        ? (Path()
-            ..moveTo(size.width * 0.12, size.height * 0.75)
-            ..quadraticBezierTo(
-              size.width * 0.47,
-              size.height * 0.1,
-              size.width * 0.9,
-              size.height * 0.18,
-            ))
-        : (Path()..moveTo(projected.first.dx, projected.first.dy));
-    if (projected != null) {
-      for (final point in projected.skip(1)) {
-        path.lineTo(point.dx, point.dy);
-      }
-    }
-    canvas.drawPath(path, route);
-    final start =
-        projected?.first ?? Offset(size.width * 0.12, size.height * 0.75);
-    final end = projected?.last ?? Offset(size.width * 0.9, size.height * 0.18);
-    canvas.drawCircle(start, 7, Paint()..color = Colors.white);
-    canvas.drawCircle(
-      start,
-      7,
-      Paint()
-        ..color = AppColors.ink
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
-    canvas.drawCircle(end, 7, Paint()..color = AppColors.ink);
-  }
-
-  @override
-  bool shouldRepaint(covariant _MapPreviewPainter oldDelegate) =>
-      oldDelegate.encodedPolyline != encodedPolyline;
-}
-
-List<Offset> _decodePolyline(String value) {
-  if (value.isEmpty) return const [];
-  final points = <Offset>[];
-  var index = 0;
-  var latitude = 0;
-  var longitude = 0;
-  try {
-    while (index < value.length) {
-      var shift = 0;
-      var result = 0;
-      int byte;
-      do {
-        byte = value.codeUnitAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-      latitude += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
-
-      shift = 0;
-      result = 0;
-      do {
-        byte = value.codeUnitAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-      longitude += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
-      points.add(Offset(longitude / 1e5, latitude / 1e5));
-    }
-  } on RangeError {
-    return const [];
-  }
-  return points;
-}
-
-List<Offset> _projectRoute(List<Offset> points, Size size) {
-  final minX = points.map((point) => point.dx).reduce(math.min);
-  final maxX = points.map((point) => point.dx).reduce(math.max);
-  final minY = points.map((point) => point.dy).reduce(math.min);
-  final maxY = points.map((point) => point.dy).reduce(math.max);
-  final spanX = math.max(maxX - minX, 0.000001);
-  final spanY = math.max(maxY - minY, 0.000001);
-  const padding = 20.0;
-  final availableWidth = math.max(1.0, size.width - padding * 2);
-  final availableHeight = math.max(1.0, size.height - padding * 2);
-  return points
-      .map(
-        (point) => Offset(
-          padding + ((point.dx - minX) / spanX) * availableWidth,
-          padding + ((maxY - point.dy) / spanY) * availableHeight,
-        ),
-      )
-      .toList(growable: false);
 }
 
 String formatTime(DateTime value) {

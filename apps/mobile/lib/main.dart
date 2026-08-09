@@ -4,6 +4,7 @@ import 'package:sidecar/src/app.dart';
 import 'package:sidecar/src/core/config/business_config_repository.dart';
 import 'package:sidecar/src/core/firebase/app_bootstrap.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
@@ -26,6 +27,9 @@ Future<void> main() async {
           bootstrap.profileRepository,
         ),
         rideRepositoryProvider.overrideWithValue(bootstrap.rideRepository),
+        bookingRepositoryProvider.overrideWithValue(
+          bootstrap.bookingRepository,
+        ),
         verificationRepositoryProvider.overrideWithValue(
           bootstrap.verificationRepository,
         ),

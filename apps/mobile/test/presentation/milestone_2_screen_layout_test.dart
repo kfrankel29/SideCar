@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
@@ -90,6 +91,29 @@ void main() {
     expect(button.onPressed, isNull);
   });
 
+  testWidgets('test insurance action verifies an eligible test driver', (
+    tester,
+  ) async {
+    final repository = _RecordingVerificationRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          verificationRepositoryProvider.overrideWithValue(repository),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: const InsuranceVerificationScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Test verify insurance'));
+    await tester.pump();
+
+    expect(repository.testVerificationCalls, 1);
+  });
+
   testWidgets('manual insurance is offered after Axle failure', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -136,6 +160,44 @@ void main() {
 
     expect(find.text('Required · not uploaded'), findsNWidgets(2));
     expect(find.text('Required · collected by Stripe'), findsNothing);
+  });
+
+  testWidgets('an already-verified Stripe session continues immediately', (
+    tester,
+  ) async {
+    final router = GoRouter(
+      initialLocation: '/hub/verify',
+      routes: [
+        GoRoute(
+          path: '/hub',
+          builder: (_, _) => const Scaffold(body: Text('Verification hub')),
+          routes: [
+            GoRoute(
+              path: 'verify',
+              builder: (_, _) => const IdentityVerificationScreen(),
+            ),
+          ],
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          verificationRepositoryProvider.overrideWithValue(
+            const _AlreadyVerifiedVerificationRepository(),
+          ),
+        ],
+        child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Verify with Stripe'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Verification hub'), findsOneWidget);
+    expect(find.text('Verify your identity'), findsNothing);
   });
 
   testWidgets('vehicle form matches the Final Draft field structure', (
@@ -321,7 +383,7 @@ class _VerificationRepository implements VerificationRepository {
   final VerificationSummary summary;
 
   @override
-  Future<Uri> createIdentityVerificationSession() async =>
+  Future<Uri?> createIdentityVerificationSession() async =>
       Uri.parse('https://verify.stripe.test');
 
   @override
@@ -337,6 +399,9 @@ class _VerificationRepository implements VerificationRepository {
   }) async {}
 
   @override
+  Future<void> verifyInsuranceForTesting() async {}
+
+  @override
   Future<String> uploadVehiclePhoto({
     required Uint8List bytes,
     required String contentType,
@@ -345,6 +410,37 @@ class _VerificationRepository implements VerificationRepository {
   @override
   Stream<VerificationSummary> watchCurrentVerification() =>
       Stream.value(summary);
+}
+
+class _RecordingVerificationRepository extends _VerificationRepository {
+  _RecordingVerificationRepository()
+    : super(
+        summary: const VerificationSummary(
+          identity: VerificationStatus.verified,
+          vehicle: VehicleProfile(
+            year: 2024,
+            make: 'Honda',
+            model: 'CR-V',
+            color: 'White',
+            licensePlate: '8ABC123',
+            photoUrl: 'https://example.test/vehicle.jpg',
+          ),
+        ),
+      );
+
+  int testVerificationCalls = 0;
+
+  @override
+  Future<void> verifyInsuranceForTesting() async {
+    testVerificationCalls += 1;
+  }
+}
+
+class _AlreadyVerifiedVerificationRepository extends _VerificationRepository {
+  const _AlreadyVerifiedVerificationRepository();
+
+  @override
+  Future<Uri?> createIdentityVerificationSession() async => null;
 }
 
 class _SafetyRepository implements SafetyRepository {

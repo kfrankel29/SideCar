@@ -14,7 +14,7 @@ publish_to: 'none'
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.1.0+20
+version: 0.1.0+44
 
 environment:
   sdk: ^3.11.1
@@ -46,6 +46,8 @@ dependencies:
   google_sign_in: ^7.2.0
   url_launcher: ^6.3.2
   share_plus: ^12.0.2
+  cached_network_image: ^3.4.1
+  flutter_stripe: ^13.1.0
 
 dev_dependencies:
   flutter_driver:
@@ -68,10 +70,20 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icons/tabs/home.png
+    - assets/icons/tabs/search.png
+    - assets/icons/tabs/post.png
+    - assets/icons/tabs/rides.png
+    - assets/icons/tabs/messages.png
+    - assets/icons/tabs/profile.png
   fonts:
     - family: SideCar Sans
       fonts:
         - asset: assets/fonts/Inter-Variable.ttf
     - family: SideCar Serif
       fonts:
-        - asset: assets/fonts/NotoSerif-Variable.ttf
+        - asset: assets/fonts/AbhayaLibre-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/AbhayaLibre-Bold.ttf
+          weight: 700
