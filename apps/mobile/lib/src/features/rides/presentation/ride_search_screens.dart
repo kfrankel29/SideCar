@@ -9,6 +9,7 @@ import 'package:sidecar/src/features/rides/presentation/place_picker_sheet.dart'
 import 'package:sidecar/src/features/rides/presentation/ride_widgets.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/routing/app_router.dart';
+import 'package:sidecar/src/theme/app_theme.dart';
 
 class SearchRidesScreen extends StatefulWidget {
   const SearchRidesScreen({super.key});
@@ -130,7 +131,7 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
   RidePlacePrediction? _originPlace;
   RidePlacePrediction? _destinationPlace;
   DateTime _date = DateUtils.dateOnly(DateTime.now());
-  DriverGenderFilter? _gender;
+  bool _womenOnly = false;
   LuggageAllowance? _luggage;
   String? _language;
   double _minimumRating = 0;
@@ -244,7 +245,9 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
       dropoffPlaceId: _destinationPlace!.placeId,
       startAt: start,
       endAt: end,
-      driverGender: _gender ?? DriverGenderFilter.any,
+      driverGender: _womenOnly
+          ? DriverGenderFilter.women
+          : DriverGenderFilter.any,
       driverLanguage: _language ?? '',
       luggageRequired: _luggage ?? LuggageAllowance.backpack,
       minimumRating: _minimumRating,
@@ -291,25 +294,37 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
                 const SizedBox(height: 26),
                 const _SectionLabel('Ride with'),
                 const SizedBox(height: 11),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: Row(
                     children: [
-                      for (final value in const [
-                        DriverGenderFilter.any,
-                        DriverGenderFilter.women,
-                      ]) ...[
-                        RideChoiceChip(
-                          label: value == DriverGenderFilter.women
-                              ? 'Women only'
-                              : value.label,
-                          selected: _gender == value,
-                          onTap: () => setState(
-                            () => _gender = _gender == value ? null : value,
-                          ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Women only',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            Text(
+                              'Show rides offered by women drivers',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                      ],
+                      ),
+                      Switch.adaptive(
+                        value: _womenOnly,
+                        onChanged: (value) =>
+                            setState(() => _womenOnly = value),
+                      ),
                     ],
                   ),
                 ),

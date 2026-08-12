@@ -106,8 +106,9 @@ class ScreenIntro extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment:
-          centerTitle ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+      crossAxisAlignment: centerTitle
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
       children: [
         if (_SideCarHeaderScope.of(context).showBack)
           const SizedBox(height: 46),

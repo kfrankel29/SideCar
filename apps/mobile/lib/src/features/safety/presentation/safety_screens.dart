@@ -116,7 +116,7 @@ class _BlockUserScreenState extends ConsumerState<BlockUserScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('${widget.name} was blocked.')));
-      context.pop();
+      context.pop(true);
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {

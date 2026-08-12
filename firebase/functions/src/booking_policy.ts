@@ -31,6 +31,16 @@ export interface RefundAmounts {
   tier: RefundTier;
 }
 
+export function canRequestGenderRestrictedRide(
+  restriction: unknown,
+  riderGender: unknown,
+): boolean {
+  if (restriction !== "women_only") return true;
+  if (typeof riderGender !== "string") return false;
+  const normalized = riderGender.trim().toLowerCase();
+  return normalized === "female" || normalized === "woman" || normalized === "women";
+}
+
 function positiveInteger(value: number, name: string): number {
   if (!Number.isInteger(value) || value < 0) throw new Error(`invalid-${name}`);
   return value;
@@ -92,7 +102,11 @@ export function validateRefundTiers(tiers: RefundTier[]): RefundTier[] {
     const total = tier.riderRefundPercentage +
       tier.platformPercentage + tier.driverPercentage;
     if (Math.abs(total - 100) > 0.001) throw new Error("invalid-refund-allocation");
-    return {...tier};
+    const {minimumHoursExclusive, ...required} = tier;
+    return {
+      ...required,
+      ...(minimumHoursExclusive === undefined ? {} : {minimumHoursExclusive}),
+    };
   });
   return normalized.sort(
     (left, right) => right.minimumHoursBeforeTrip - left.minimumHoursBeforeTrip,

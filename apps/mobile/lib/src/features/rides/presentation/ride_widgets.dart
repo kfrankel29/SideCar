@@ -117,7 +117,13 @@ class RideCard extends StatelessWidget {
                       ),
                       if (ride.driverRating > 0) ...[
                         const SizedBox(width: 8),
-                        const Text('★', style: TextStyle(fontSize: 15)),
+                        const Text(
+                          '★',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                         const SizedBox(width: 3),
                         Text(
                           ride.driverRating.toStringAsFixed(1),
@@ -139,7 +145,7 @@ class RideCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: AppColors.secondaryInk,
-                      fontWeight: FontWeight.w400,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],

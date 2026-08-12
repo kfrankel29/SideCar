@@ -13,7 +13,7 @@
     },
     "allowed_test_emails": {
       "defaultValue": {
-        "value": "[\"alijonovshohruhmirzo@gmail.com\",\"shohruh@fera-tech.com\",\"shohruxa26@gmail.com\",\"shohruhmirzoalijonov@gmail.com\",\"kfrankel@ucsb.edu\"]"
+        "value": "[\"alijonovshohruhmirzo@gmail.com\",\"shohruh@fera-tech.com\",\"shohruxa26@gmail.com\",\"shohruhmirzoalijonov@gmail.com\",\"kfrankel@ucsb.edu\",\"shahinsheikh@ucsb.edu\",\"afranke67@ucsb.edu\",\"m4.driver.qa@ucsb.edu\",\"m4.rider.qa@ucsb.edu\",\"alijonovshohruhmirzo+sidecar-m4-driver-0810@gmail.com\",\"alijonovshohruhmirzo+sidecar-m4-rider-0810@gmail.com\",\"alijonovshohruhmirzo+sidecar-m4-driver-0812@gmail.com\",\"alijonovshohruhmirzo+sidecar-m4-rider-0812@gmail.com\"]"
       },
       "description": "JSON array of exact non-school email addresses allowed for controlled testing.",
       "valueType": "JSON"

@@ -18,8 +18,8 @@ class FirebaseBookingRepository implements BookingRepository {
   final _driverCache = AsyncTtlCache<List<SeatBooking>>();
 
   @override
-  Future<SeatBooking> requestSeat(String rideId) async {
-    final data = await _call('requestSeat', {'rideId': rideId});
+  Future<SeatBooking> requestSeat(SeatRequest request) async {
+    final data = await _call('requestSeat', request.toJson());
     _clear();
     return SeatBooking.fromJson(_map(data['booking']));
   }
@@ -131,8 +131,12 @@ class FirebaseBookingRepository implements BookingRepository {
   }
 
   @override
-  Future<void> addPaymentMethod() async {
-    final setup = await _call('createPaymentMethodSetup', const {});
+  Future<bool> addPaymentMethod([
+    BookingPaymentMethod method = BookingPaymentMethod.card,
+  ]) async {
+    final setup = await _call('createPaymentMethodSetup', {
+      'paymentMethod': method.wireValue,
+    });
     final clientSecret = setup['clientSecret'] as String? ?? '';
     if (clientSecret.isEmpty) {
       throw const AppFailure('Payment setup could not be initialized.');
@@ -146,17 +150,20 @@ class FirebaseBookingRepository implements BookingRepository {
         merchantDisplayName:
             setup['merchantDisplayName'] as String? ?? 'SideCar',
         style: ThemeMode.light,
-        allowsDelayedPaymentMethods: true,
-        paymentMethodOrder: const ['card', 'us_bank_account'],
+        allowsDelayedPaymentMethods: method == BookingPaymentMethod.bank,
+        paymentMethodOrder: method == BookingPaymentMethod.bank
+            ? const ['us_bank_account']
+            : const ['card'],
         returnURL: 'sidecar://app/stripe-redirect',
       ),
     );
     try {
       await Stripe.instance.presentPaymentSheet();
     } on StripeException catch (error) {
-      if (error.error.code == FailureCode.Canceled) return;
+      if (error.error.code == FailureCode.Canceled) return false;
       throw AppFailure(error.error.localizedMessage ?? 'Payment setup failed.');
     }
+    return true;
   }
 
   @override

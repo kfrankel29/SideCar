@@ -5,6 +5,7 @@ import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {getRemoteConfig} from "firebase-admin/remote-config";
 import {getStorage} from "firebase-admin/storage";
 import {defineSecret} from "firebase-functions/params";
+import {logger} from "firebase-functions";
 import {HttpsError, onCall, onRequest} from "firebase-functions/v2/https";
 import Stripe from "stripe";
 import {parseManualInsuranceDocument} from "./manual_insurance.js";
@@ -29,6 +30,7 @@ export {
 } from "./rides.js";
 
 export {
+  blockUser,
   cancelDriverRide,
   cancelSeatBooking,
   completeTrip,
@@ -49,6 +51,8 @@ export {
   stripePaymentsWebhook,
   verifyPickupCode,
 } from "./bookings.js";
+
+export {getPublicProfile} from "./public_profiles.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -75,6 +79,18 @@ function text(value: unknown, field: string, maxLength = 200): string {
     throw new HttpsError("invalid-argument", `${field} is invalid.`);
   }
   return normalized;
+}
+
+function stripeErrorContext(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Stripe.errors.StripeError)) {
+    return {type: "unknown"};
+  }
+  return {
+    type: error.type,
+    code: error.code,
+    param: error.param,
+    statusCode: error.statusCode,
+  };
 }
 
 function normalizeEmail(value: unknown): string {
@@ -341,30 +357,44 @@ export const completeGoogleStudentSignIn = onCall(
 export const requestEmailVerificationCode = onCall(
   {region, enforceAppCheck: true, secrets: [otpHashSecret], maxInstances: 30},
   async (request) => {
-    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
-    const data = request.data as Record<string, unknown>;
-    const user = await auth.getUser(request.auth.uid);
-    if (!user.email) throw new HttpsError("failed-precondition", "This account has no email.");
-    if (user.emailVerified) return {accepted: true};
-    await assertAllowedSchoolEmail(user.email);
+    let stage = "authenticate";
+    try {
+      if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+      const data = (request.data ?? {}) as Record<string, unknown>;
+      stage = "load-user";
+      const user = await auth.getUser(request.auth.uid);
+      if (!user.email) throw new HttpsError("failed-precondition", "This account has no email.");
+      if (user.emailVerified) return {accepted: true};
+      stage = "authorize-email";
+      await assertAllowedSchoolEmail(user.email);
 
-    if (data.firstName !== undefined || data.lastName !== undefined) {
-      const firstName = text(data.firstName, "First name", 80);
-      const lastName = text(data.lastName, "Last name", 80);
-      const displayName = `${firstName} ${lastName}`;
-      await Promise.all([
-        auth.updateUser(user.uid, {displayName}),
-        db.collection("users").doc(user.uid).set({
-          firstName,
-          lastName,
-          displayName,
-          updatedAt: FieldValue.serverTimestamp(),
-        }, {merge: true}),
-      ]);
+      if (data.firstName !== undefined || data.lastName !== undefined) {
+        stage = "update-profile";
+        const firstName = text(data.firstName, "First name", 80);
+        const lastName = text(data.lastName, "Last name", 80);
+        const displayName = `${firstName} ${lastName}`;
+        await Promise.all([
+          auth.updateUser(user.uid, {displayName}),
+          db.collection("users").doc(user.uid).set({
+            firstName,
+            lastName,
+            displayName,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, {merge: true}),
+        ]);
+      }
+
+      stage = "send-code";
+      await sendOtp({email: user.email, purpose: "verify_email", uid: user.uid});
+      return {accepted: true};
+    } catch (error) {
+      logger.error("Email verification code request failed.", {
+        stage,
+        errorType: error instanceof Error ? error.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
     }
-
-    await sendOtp({email: user.email, purpose: "verify_email", uid: user.uid});
-    return {accepted: true};
   },
 );
 
@@ -477,7 +507,7 @@ export const createIdentityVerificationSession = onCall(
     }
     await assertAllowedSchoolEmail(user.email);
 
-    const stripe = new Stripe(stripeSecretKey.value());
+    const stripe = new Stripe(stripeSecretKey.value().trim());
     const statusReference = db.collection("users").doc(user.uid)
       .collection("verifications").doc("current");
     const statusData = (await statusReference.get()).data();
@@ -503,25 +533,31 @@ export const createIdentityVerificationSession = onCall(
           return {url: outcome.url};
         }
       } catch (error) {
-        if (!(error instanceof Stripe.errors.StripeInvalidRequestError) ||
-            error.code !== "resource_missing") {
-          throw new HttpsError(
-            "unavailable",
-            "Stripe verification is temporarily unavailable. Try again.",
-          );
-        }
+        logger.warn(
+          "Replacing an unavailable Stripe Identity verification session.",
+          stripeErrorContext(error),
+        );
+        await statusReference.set({
+          identityStatus: "notStarted",
+          stripeVerificationSessionId: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true});
       }
     }
 
     let session: Stripe.Identity.VerificationSession;
     try {
       session = await stripe.identity.verificationSessions.create({
-        verification_flow: stripeIdentityVerificationFlowId.value(),
+        verification_flow: stripeIdentityVerificationFlowId.value().trim(),
         client_reference_id: user.uid,
         provided_details: {email: user.email},
         metadata: {uid: user.uid},
       });
-    } catch {
+    } catch (error) {
+      logger.error(
+        "Unable to create Stripe Identity verification session.",
+        stripeErrorContext(error),
+      );
       throw new HttpsError(
         "unavailable",
         "Stripe verification is temporarily unavailable. Try again.",
@@ -562,11 +598,11 @@ export const stripeIdentityWebhook = onRequest(
 
     let event: Stripe.Event;
     try {
-      const stripe = new Stripe(stripeSecretKey.value());
+      const stripe = new Stripe(stripeSecretKey.value().trim());
       event = stripe.webhooks.constructEvent(
         request.rawBody,
         signature,
-        stripeIdentityWebhookSecret.value(),
+        stripeIdentityWebhookSecret.value().trim(),
       );
     } catch {
       response.status(400).send("Invalid Stripe signature");
@@ -769,7 +805,7 @@ function targetUid(value: unknown, currentUid: string): string {
   return uid;
 }
 
-export const blockUser = onCall(
+export const getBlockStatus = onCall(
   {region, enforceAppCheck: true, maxInstances: 30},
   async (request) => {
     if (!request.auth) {
@@ -777,16 +813,23 @@ export const blockUser = onCall(
     }
     const data = request.data as Record<string, unknown>;
     const blockedUid = targetUid(data.targetUserId, request.auth.uid);
-    const blockedUser = await auth.getUser(blockedUid).catch(() => null);
-    if (!blockedUser) {
-      throw new HttpsError("not-found", "That account could not be found.");
+    const snapshot = await db.collection("users").doc(request.auth.uid)
+      .collection("blockedUsers").doc(blockedUid).get();
+    return {blocked: snapshot.exists};
+  },
+);
+
+export const unblockUser = onCall(
+  {region, enforceAppCheck: true, maxInstances: 30},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
     }
+    const data = request.data as Record<string, unknown>;
+    const blockedUid = targetUid(data.targetUserId, request.auth.uid);
     await db.collection("users").doc(request.auth.uid)
-      .collection("blockedUsers").doc(blockedUid).set({
-        blockedUserId: blockedUid,
-        createdAt: FieldValue.serverTimestamp(),
-      });
-    return {blocked: true};
+      .collection("blockedUsers").doc(blockedUid).delete();
+    return {blocked: false};
   },
 );
 

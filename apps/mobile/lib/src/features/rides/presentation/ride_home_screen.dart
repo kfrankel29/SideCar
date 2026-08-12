@@ -256,7 +256,7 @@ class _DriverHome extends StatelessWidget {
         ),
         const SizedBox(height: 26),
         Text(
-          'Your upcoming ride',
+          'Your upcoming rides',
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 14),
@@ -269,7 +269,11 @@ class _DriverHome extends StatelessWidget {
             if (snapshot.hasError) return _RideLoadError(onRetry: onRetry);
             final now = DateTime.now();
             final values = (snapshot.data ?? const <Ride>[])
-                .where((ride) => !ride.departureAt.isBefore(now))
+                .where(
+                  (ride) =>
+                      ride.status == 'published' &&
+                      !ride.departureAt.isBefore(now),
+                )
                 .toList();
             if (values.isEmpty) {
               return const _EmptyRides(
@@ -277,24 +281,30 @@ class _DriverHome extends StatelessWidget {
                 message: 'Post a ride when you know your next trip.',
               );
             }
-            final ride = values.first;
-            return InkWell(
-              onTap: () => context.push('/rides/${ride.id}'),
-              child: Container(
-                height: 150,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.border),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: RideRouteCard(
-                  origin: ride.origin.displayName,
-                  destination: ride.destination.displayName,
-                  originSubtitle:
-                      '${formatShortDate(ride.departureAt)} · ${formatTime(ride.departureAt)}',
-                  destinationSubtitle: 'Upcoming',
-                ),
-              ),
+            return Column(
+              children: [
+                for (var index = 0; index < values.length; index++) ...[
+                  InkWell(
+                    onTap: () => context.push('/rides/${values[index].id}'),
+                    child: Container(
+                      height: 150,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppColors.border),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: RideRouteCard(
+                        origin: values[index].origin.displayName,
+                        destination: values[index].destination.displayName,
+                        originSubtitle:
+                            '${formatShortDate(values[index].departureAt)} · ${formatTime(values[index].departureAt)}',
+                        destinationSubtitle: 'Upcoming',
+                      ),
+                    ),
+                  ),
+                  if (index != values.length - 1) const SizedBox(height: 12),
+                ],
+              ],
             );
           },
         ),

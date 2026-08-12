@@ -10,6 +10,7 @@ abstract interface class RideRepository {
   Future<List<Ride>> listLeavingSoon({bool forceRefresh = false});
   Future<Ride> getRide(String rideId);
   Future<List<Ride>> listMyRides({bool forceRefresh = false});
+  void invalidateRide(String rideId);
 }
 
 final rideRepositoryProvider = Provider<RideRepository>(

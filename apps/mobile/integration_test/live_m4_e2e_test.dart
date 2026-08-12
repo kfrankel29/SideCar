@@ -86,20 +86,11 @@ void main() {
           riderPassword: riderPassword,
         );
         return;
-      case 'prepare-ach':
-        await _prepareAchPayment(
+      case 'feedback-rules':
+        await _verifyFeedbackRules(
           bootstrap,
           driverEmail: driverEmail,
           driverPassword: driverPassword,
-          riderEmail: riderEmail,
-          riderPassword: riderPassword,
-        );
-        return;
-      case 'verify-ach':
-        expect(bookingId, isNotEmpty);
-        await _verifyAchPayment(
-          bootstrap,
-          bookingId,
           riderEmail: riderEmail,
           riderPassword: riderPassword,
         );
@@ -108,6 +99,164 @@ void main() {
         fail('Set M4_E2E_PHASE to a supported live test phase.');
     }
   });
+}
+
+Future<void> _verifyFeedbackRules(
+  AppBootstrapResult bootstrap, {
+  required String driverEmail,
+  required String driverPassword,
+  required String riderEmail,
+  required String riderPassword,
+}) async {
+  await bootstrap.authRepository.signOut();
+  await bootstrap.authRepository.signIn(
+    email: driverEmail,
+    password: driverPassword,
+  );
+  final origin = await _firstPlace(
+    bootstrap,
+    'University of California Santa Barbara',
+  );
+  final destination = await _firstPlace(
+    bootstrap,
+    'Los Angeles International Airport',
+  );
+  final departure = DateTime.now().add(
+    Duration(
+      days: 220,
+      seconds: DateTime.now().millisecondsSinceEpoch.remainder(18000),
+    ),
+  );
+  final womenOnlyRide = await bootstrap.rideRepository.createRide(
+    RideDraft(
+      origin: origin,
+      destination: destination,
+      departureAt: departure,
+      seats: 2,
+      pricePerSeatCents: 2000,
+      luggageAllowance: LuggageAllowance.backpack,
+      genderRestriction: RideGenderRestriction.womenOnly,
+    ),
+  );
+  final secondRide = await bootstrap.rideRepository.createRide(
+    RideDraft(
+      origin: origin,
+      destination: destination,
+      departureAt: departure.add(const Duration(days: 2)),
+      seats: 3,
+      pricePerSeatCents: 2200,
+      luggageAllowance: LuggageAllowance.oneSuitcase,
+      genderRestriction: RideGenderRestriction.any,
+    ),
+  );
+  final driverRides = await bootstrap.rideRepository.listMyRides(
+    forceRefresh: true,
+  );
+  expect(driverRides.any((ride) => ride.id == womenOnlyRide.id), isTrue);
+  expect(driverRides.any((ride) => ride.id == secondRide.id), isTrue);
+
+  await bootstrap.authRepository.signOut();
+  await bootstrap.authRepository.signIn(
+    email: riderEmail,
+    password: riderPassword,
+  );
+  final riderProfile = await bootstrap.profileRepository.loadCurrentProfile();
+  expect(riderProfile, isNotNull);
+  await bootstrap.profileRepository.saveProfile(
+    riderProfile!.copyWith(gender: 'Male'),
+  );
+  final seatRequest = SeatRequest(
+    rideId: womenOnlyRide.id,
+    seat: BookingSeat.front,
+    pickupPlaceId: womenOnlyRide.origin.placeId,
+    dropoffPlaceId: womenOnlyRide.destination.placeId,
+  );
+  await expectLater(
+    bootstrap.bookingRepository.requestSeat(seatRequest),
+    throwsA(
+      isA<AppFailure>().having(
+        (failure) => failure.code,
+        'code',
+        'permission-denied',
+      ),
+    ),
+  );
+  await bootstrap.profileRepository.saveProfile(
+    riderProfile.copyWith(gender: 'Female'),
+  );
+  final request = await bootstrap.bookingRepository.requestSeat(seatRequest);
+  expect(request.status, BookingStatus.pendingDriver);
+
+  await bootstrap.authRepository.signOut();
+  await bootstrap.authRepository.signIn(
+    email: driverEmail,
+    password: driverPassword,
+  );
+  final requests = await bootstrap.bookingRepository.listRideRequests(
+    rideId: womenOnlyRide.id,
+    forceRefresh: true,
+  );
+  expect(
+    requests.any(
+      (booking) =>
+          booking.id == request.id &&
+          booking.status == BookingStatus.pendingDriver,
+    ),
+    isTrue,
+  );
+  await bootstrap.safetyRepository.blockUser(request.riderId);
+  expect(await bootstrap.safetyRepository.isBlocked(request.riderId), isTrue);
+  final removedRequest = await bootstrap.bookingRepository.refreshBooking(
+    request.id,
+  );
+  expect(removedRequest.status, BookingStatus.cancelled);
+
+  await bootstrap.authRepository.signOut();
+  await bootstrap.authRepository.signIn(
+    email: riderEmail,
+    password: riderPassword,
+  );
+  await expectLater(
+    bootstrap.bookingRepository.requestSeat(seatRequest),
+    throwsA(
+      isA<AppFailure>().having(
+        (failure) => failure.code,
+        'code',
+        'permission-denied',
+      ),
+    ),
+  );
+
+  await bootstrap.authRepository.signOut();
+  await bootstrap.authRepository.signIn(
+    email: driverEmail,
+    password: driverPassword,
+  );
+  await bootstrap.safetyRepository.unblockUser(request.riderId);
+  expect(await bootstrap.safetyRepository.isBlocked(request.riderId), isFalse);
+
+  await bootstrap.authRepository.signOut();
+  await bootstrap.authRepository.signIn(
+    email: riderEmail,
+    password: riderPassword,
+  );
+  final unblockedRequest = await bootstrap.bookingRepository.requestSeat(
+    seatRequest,
+  );
+  expect(unblockedRequest.status, BookingStatus.pendingDriver);
+
+  await bootstrap.authRepository.signOut();
+  await bootstrap.authRepository.signIn(
+    email: driverEmail,
+    password: driverPassword,
+  );
+  await bootstrap.safetyRepository.blockUser(unblockedRequest.riderId);
+  await bootstrap.safetyRepository.unblockUser(unblockedRequest.riderId);
+  await bootstrap.rideRepository.cancelRide(womenOnlyRide.id);
+  await bootstrap.rideRepository.cancelRide(secondRide.id);
+  debugPrint(
+    'M4_E2E_RESULT=${jsonEncode({'womenOnlyRide': true, 'driverRideRefresh': true, 'blockRemoval': true, 'unblock': true})}',
+  );
 }
 
 Future<void> _preparePayment(
@@ -142,7 +291,7 @@ Future<void> _preparePayment(
     RideDraft(
       origin: origin,
       destination: destination,
-      departureAt: DateTime.now().add(const Duration(days: 8)),
+      departureAt: DateTime.now().add(const Duration(days: 80)),
       seats: 1,
       pricePerSeatCents: 2500,
       luggageAllowance: LuggageAllowance.oneSuitcase,
@@ -155,7 +304,14 @@ Future<void> _preparePayment(
     email: riderEmail,
     password: riderPassword,
   );
-  final request = await bootstrap.bookingRepository.requestSeat(ride.id);
+  final request = await bootstrap.bookingRepository.requestSeat(
+    SeatRequest(
+      rideId: ride.id,
+      seat: BookingSeat.front,
+      pickupPlaceId: ride.origin.placeId,
+      dropoffPlaceId: ride.destination.placeId,
+    ),
+  );
   expect(request.status, BookingStatus.pendingDriver);
 
   await bootstrap.authRepository.signOut();
@@ -288,7 +444,7 @@ Future<void> _prepareRefund(
     RideDraft(
       origin: origin,
       destination: destination,
-      departureAt: DateTime.now().add(const Duration(days: 30)),
+      departureAt: DateTime.now().add(const Duration(days: 120)),
       seats: 1,
       pricePerSeatCents: 1800,
       luggageAllowance: LuggageAllowance.backpack,
@@ -301,7 +457,14 @@ Future<void> _prepareRefund(
     email: riderEmail,
     password: riderPassword,
   );
-  final request = await bootstrap.bookingRepository.requestSeat(ride.id);
+  final request = await bootstrap.bookingRepository.requestSeat(
+    SeatRequest(
+      rideId: ride.id,
+      seat: BookingSeat.rearLeft,
+      pickupPlaceId: ride.origin.placeId,
+      dropoffPlaceId: ride.destination.placeId,
+    ),
+  );
 
   await bootstrap.authRepository.signOut();
   await bootstrap.authRepository.signIn(
@@ -359,101 +522,6 @@ Future<void> _verifyRefund(
   expect(booking.status, BookingStatus.cancelled);
   expect(booking.paymentStatus, 'refunded');
   expect(booking.totalCents, paidTotal);
-}
-
-Future<void> _prepareAchPayment(
-  AppBootstrapResult bootstrap, {
-  required String driverEmail,
-  required String driverPassword,
-  required String riderEmail,
-  required String riderPassword,
-}) async {
-  await bootstrap.authRepository.signOut();
-  await bootstrap.authRepository.signIn(
-    email: driverEmail,
-    password: driverPassword,
-  );
-  final origin = await _firstPlace(
-    bootstrap,
-    'University of California Santa Barbara',
-  );
-  final destination = await _firstPlace(
-    bootstrap,
-    'Sacramento International Airport',
-  );
-  final ride = await bootstrap.rideRepository.createRide(
-    RideDraft(
-      origin: origin,
-      destination: destination,
-      departureAt: DateTime.now().add(const Duration(days: 45)),
-      seats: 1,
-      pricePerSeatCents: 2000,
-      luggageAllowance: LuggageAllowance.twoPlusBags,
-      genderRestriction: RideGenderRestriction.any,
-    ),
-  );
-
-  await bootstrap.authRepository.signOut();
-  await bootstrap.authRepository.signIn(
-    email: riderEmail,
-    password: riderPassword,
-  );
-  final request = await bootstrap.bookingRepository.requestSeat(ride.id);
-
-  await bootstrap.authRepository.signOut();
-  await bootstrap.authRepository.signIn(
-    email: driverEmail,
-    password: driverPassword,
-  );
-  await bootstrap.bookingRepository.respondToRequest(request.id, accept: true);
-
-  await bootstrap.authRepository.signOut();
-  await bootstrap.authRepository.signIn(
-    email: riderEmail,
-    password: riderPassword,
-  );
-  final quote = await bootstrap.bookingRepository.quoteBookingPayment(
-    request.id,
-    BookingPaymentMethod.bank,
-  );
-  expect(quote.baseFareCents, 2000);
-  expect(quote.serviceFeeCents, 160);
-  expect(quote.processingFeeCents, greaterThan(0));
-  final result = await FirebaseFunctions.instanceFor(region: 'us-central1')
-      .httpsCallable('createBookingPayment')
-      .call<Map<String, dynamic>>({
-        'bookingId': request.id,
-        'paymentMethod': 'bank',
-      });
-  final clientSecret = result.data['clientSecret'] as String? ?? '';
-  expect(clientSecret, startsWith('pi_'));
-  debugPrint(
-    'M4_E2E_RESULT=${jsonEncode({'rideId': ride.id, 'bookingId': request.id, 'paymentIntentId': clientSecret.split('_secret_').first, 'totalCents': quote.totalCents})}',
-  );
-}
-
-Future<void> _verifyAchPayment(
-  AppBootstrapResult bootstrap,
-  String bookingId, {
-  required String riderEmail,
-  required String riderPassword,
-}) async {
-  await bootstrap.authRepository.signOut();
-  await bootstrap.authRepository.signIn(
-    email: riderEmail,
-    password: riderPassword,
-  );
-  SeatBooking booking = await bootstrap.bookingRepository.refreshBooking(
-    bookingId,
-  );
-  for (var attempt = 0; attempt < 30; attempt++) {
-    if (booking.status == BookingStatus.confirmed) break;
-    await Future<void>.delayed(const Duration(seconds: 1));
-    booking = await bootstrap.bookingRepository.refreshBooking(bookingId);
-  }
-  expect(booking.status, BookingStatus.confirmed);
-  expect(booking.paymentStatus, 'paid');
-  expect(booking.totalCents, greaterThan(2160));
 }
 
 Future<RidePlacePrediction> _firstPlace(

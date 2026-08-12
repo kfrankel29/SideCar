@@ -48,4 +48,30 @@ void main() {
     cache.clear();
     expect(await cache.get(const Duration(minutes: 1), load), 3);
   });
+
+  test('force refresh supersedes an older in-flight load', () async {
+    final firstCompletion = Completer<int>();
+    final secondCompletion = Completer<int>();
+    var loads = 0;
+    final cache = AsyncTtlCache<int>();
+
+    Future<int> load() {
+      loads += 1;
+      return loads == 1 ? firstCompletion.future : secondCompletion.future;
+    }
+
+    final first = cache.get(const Duration(minutes: 1), load);
+    final second = cache.get(
+      const Duration(minutes: 1),
+      load,
+      forceRefresh: true,
+    );
+
+    expect(loads, 2);
+    secondCompletion.complete(2);
+    expect(await second, 2);
+    firstCompletion.complete(1);
+    expect(await first, 1);
+    expect(await cache.get(const Duration(minutes: 1), load), 2);
+  });
 }

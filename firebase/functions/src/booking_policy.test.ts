@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canRequestGenderRestrictedRide,
   calculateCheckoutAmounts,
   refundForRiderCancellation,
   validateRefundTiers,
 } from "./booking_policy.js";
+
+test("women-only rides accept only a female rider profile", () => {
+  assert.equal(canRequestGenderRestrictedRide("women_only", "Female"), true);
+  assert.equal(canRequestGenderRestrictedRide("women_only", "female"), true);
+  assert.equal(canRequestGenderRestrictedRide("women_only", "Male"), false);
+  assert.equal(canRequestGenderRestrictedRide("women_only", undefined), false);
+  assert.equal(canRequestGenderRestrictedRide("anyone", "Male"), true);
+});
 
 const checkoutPolicy = {
   serviceFeeType: "percentage" as const,
@@ -70,4 +79,15 @@ test("invalid refund allocations fail closed", () => {
     () => validateRefundTiers([{minimumHoursBeforeTrip: 0, riderRefundPercentage: 50, platformPercentage: 8, driverPercentage: 41}]),
     /invalid-refund-allocation/,
   );
+});
+
+test("normalized refund tiers omit optional undefined fields", () => {
+  const tier = validateRefundTiers([{
+    minimumHoursBeforeTrip: 0,
+    minimumHoursExclusive: undefined,
+    riderRefundPercentage: 100,
+    platformPercentage: 0,
+    driverPercentage: 0,
+  }])[0]!;
+  assert.equal(Object.hasOwn(tier, "minimumHoursExclusive"), false);
 });

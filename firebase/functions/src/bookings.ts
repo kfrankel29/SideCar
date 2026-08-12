@@ -11,10 +11,16 @@ import Stripe from "stripe";
 import {
   CheckoutPolicy,
   RefundTier,
+  canRequestGenderRestrictedRide,
   calculateCheckoutAmounts,
   refundForRiderCancellation,
   validateRefundTiers,
 } from "./booking_policy.js";
+import {
+  PolygonRing,
+  decodeGooglePolyline,
+  routePointAllowed,
+} from "./ride_routing.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -24,9 +30,11 @@ const stripePaymentsSecretKey = defineSecret("STRIPE_PAYMENTS_SECRET_KEY");
 const stripePublishableKey = defineSecret("STRIPE_PUBLISHABLE_KEY");
 const stripePaymentsWebhookSecret = defineSecret("STRIPE_PAYMENTS_WEBHOOK_SECRET");
 const bookingCodeSecret = defineSecret("BOOKING_CODE_SECRET");
+const googleMapsApiKey = defineSecret("GOOGLE_MAPS_API_KEY");
 const region = "us-central1";
 
 type Json = Record<string, unknown>;
+type SeatKey = "front" | "rear_left" | "rear_right";
 type BookingStatus =
   "pending_driver" | "declined" | "accepted_payment_pending" |
   "payment_processing" | "confirmed" | "expired" | "cancelled" |
@@ -56,14 +64,43 @@ function capitalize(value: string): string {
   return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
 }
 
+function seatKey(value: unknown): SeatKey {
+  if (value === "front" || value === "rear_left" || value === "rear_right") {
+    return value;
+  }
+  throw new HttpsError("invalid-argument", "Choose an available seat.");
+}
+
+function seatLabel(value: SeatKey): string {
+  switch (value) {
+  case "front": return "Front";
+  case "rear_left": return "Rear left";
+  case "rear_right": return "Rear right";
+  }
+}
+
+function isStripeResourceMissing(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const data = error as {code?: unknown; raw?: {code?: unknown}};
+  return data.code === "resource_missing" || data.raw?.code === "resource_missing";
+}
+
 function stripe(): Stripe {
-  return new Stripe(stripePaymentsSecretKey.value(), {maxNetworkRetries: 2});
+  return new Stripe(stripePaymentsSecretKey.value().trim(), {maxNetworkRetries: 2});
 }
 
 async function stripeCustomerId(uid: string): Promise<string> {
   const reference = db.collection("payment_customers").doc(uid);
   const existing = (await reference.get()).data()?.stripeCustomerId;
-  if (typeof existing === "string" && existing) return existing;
+  if (typeof existing === "string" && existing) {
+    try {
+      const customer = await stripe().customers.retrieve(existing);
+      if (!("deleted" in customer) || customer.deleted !== true) return existing;
+    } catch (error) {
+      if (!isStripeResourceMissing(error)) throw error;
+      logger.info("Replacing a Stripe customer from a previous test account.", {uid});
+    }
+  }
   const user = await auth.getUser(uid);
   const customer = await stripe().customers.create({
     email: user.email,
@@ -72,9 +109,11 @@ async function stripeCustomerId(uid: string): Promise<string> {
   }, {idempotencyKey: `sidecar-customer-${uid}`});
   await reference.set({
     stripeCustomerId: customer.id,
-    createdAt: FieldValue.serverTimestamp(),
+    ...(existing ? {recoveredAt: FieldValue.serverTimestamp()} : {
+      createdAt: FieldValue.serverTimestamp(),
+    }),
     updatedAt: FieldValue.serverTimestamp(),
-  });
+  }, {merge: true});
   return customer.id;
 }
 
@@ -97,7 +136,7 @@ async function remoteValue(key: string): Promise<string> {
     const value = template.parameters[key]?.defaultValue;
     if (value && "value" in value && value.value.trim()) return value.value.trim();
   } catch (error) {
-    logger.warn("M4 Remote Config read failed.", {
+    logger.warn("Remote Config read failed.", {
       key,
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
@@ -146,7 +185,7 @@ async function refundTiers(): Promise<RefundTier[]> {
       }
       return {
         minimumHoursBeforeTrip: Number(item.minimumHoursBeforeTrip),
-        minimumHoursExclusive,
+        ...(minimumHoursExclusive === undefined ? {} : {minimumHoursExclusive}),
         riderRefundPercentage: Number(item.riderRefundPercentage),
         platformPercentage: Number(item.platformPercentage),
         driverPercentage: Number(item.driverPercentage),
@@ -205,7 +244,12 @@ function timestampIso(value: unknown): string | null {
   return value instanceof Timestamp ? value.toDate().toISOString() : null;
 }
 
-function bookingJson(id: string, data: Json, viewerId: string): Json {
+function bookingJson(
+  id: string,
+  data: Json,
+  viewerId: string,
+  photos: {rider?: string; driver?: string} = {},
+): Json {
   const isRider = data.riderId === viewerId;
   const cancellation = data.cancellationSummary && typeof data.cancellationSummary === "object" ?
     data.cancellationSummary as Json : null;
@@ -215,12 +259,17 @@ function bookingJson(id: string, data: Json, viewerId: string): Json {
     riderId: data.riderId,
     riderName: data.riderName,
     riderInitials: data.riderInitials,
-    riderPhotoUrl: data.riderPhotoUrl ?? "",
+    riderPhotoUrl: photos.rider ?? data.riderPhotoUrl ?? "",
     driverId: data.driverId,
     driverName: data.driverName,
+    driverPhotoUrl: photos.driver ?? data.driverPhotoUrl ?? "",
     status: data.status,
     originName: data.originName,
     destinationName: data.destinationName,
+    seatKey: data.seatKey ?? "front",
+    seatLabel: data.seatLabel ?? "Front",
+    pickupLocation: data.pickupLocation ?? null,
+    dropoffLocation: data.dropoffLocation ?? null,
     departureAt: timestampIso(data.departureAt),
     acceptedAt: timestampIso(data.acceptedAt),
     paymentExpiresAt: timestampIso(data.paymentExpiresAt),
@@ -243,6 +292,142 @@ function bookingJson(id: string, data: Json, viewerId: string): Json {
   };
 }
 
+async function currentProfilePhotos(userIds: string[]): Promise<Map<string, string>> {
+  const uniqueIds = [...new Set(userIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return new Map();
+  const snapshots = await db.getAll(
+    ...uniqueIds.map((id) => db.collection("users").doc(id)),
+  );
+  return new Map(snapshots.flatMap((snapshot) => {
+    const photoUrl = String(snapshot.data()?.photoUrl ?? "").trim();
+    return photoUrl ? [[snapshot.id, photoUrl] as const] : [];
+  }));
+}
+
+interface BookingPlace {
+  placeId: string;
+  displayName: string;
+  formattedAddress: string;
+  latitude: number;
+  longitude: number;
+}
+
+async function mapsJson(url: string, init: RequestInit): Promise<Json> {
+  let response: Response;
+  try {
+    response = await fetch(url, {...init, signal: AbortSignal.timeout(10_000)});
+  } catch {
+    throw new HttpsError("unavailable", "Maps is temporarily unavailable. Try again.");
+  }
+  if (!response.ok) {
+    throw new HttpsError("unavailable", "Maps could not validate these addresses. Try again.");
+  }
+  return object(await response.json());
+}
+
+async function bookingPlace(placeId: string): Promise<BookingPlace> {
+  const id = stringValue(placeId, "Address", 300);
+  const response = await mapsJson(
+    `https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`,
+    {
+      method: "GET",
+      headers: {
+        "X-Goog-Api-Key": googleMapsApiKey.value(),
+        "X-Goog-FieldMask": "id,displayName,formattedAddress,location",
+      },
+    },
+  );
+  const displayName = object(response.displayName).text;
+  const location = object(response.location);
+  if (typeof displayName !== "string" ||
+      typeof response.formattedAddress !== "string" ||
+      typeof location.latitude !== "number" ||
+      typeof location.longitude !== "number") {
+    throw new HttpsError("invalid-argument", "Choose a valid address from the list.");
+  }
+  return {
+    placeId: id,
+    displayName,
+    formattedAddress: response.formattedAddress,
+    latitude: location.latitude,
+    longitude: location.longitude,
+  };
+}
+
+async function rideBoundaryRings(): Promise<PolygonRing[]> {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(await remoteValue("pickup_dropoff_boundary_geojson"));
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError("failed-precondition", "Ride boundary configuration is invalid.");
+  }
+  const coordinates = object(decoded).coordinates;
+  if (!Array.isArray(coordinates)) {
+    throw new HttpsError("failed-precondition", "Ride boundary configuration is invalid.");
+  }
+  const rings: PolygonRing[] = [];
+  for (const ring of coordinates) {
+    if (!Array.isArray(ring)) continue;
+    const points: Array<readonly [number, number]> = [];
+    for (const coordinate of ring) {
+      if (Array.isArray(coordinate) && coordinate.length >= 2 &&
+          typeof coordinate[0] === "number" && typeof coordinate[1] === "number") {
+        points.push([coordinate[0], coordinate[1]]);
+      }
+    }
+    if (points.length >= 4) rings.push(points);
+  }
+  if (rings.length === 0) {
+    throw new HttpsError("failed-precondition", "Ride boundary configuration is invalid.");
+  }
+  return rings;
+}
+
+async function validatedBookingStops(params: {
+  encodedPolyline: unknown;
+  pickupPlaceId: string;
+  dropoffPlaceId: string;
+}): Promise<{pickup: BookingPlace; dropoff: BookingPlace}> {
+  if (typeof params.encodedPolyline !== "string" || !params.encodedPolyline) {
+    throw new HttpsError("failed-precondition", "This ride route is unavailable.");
+  }
+  let route;
+  try {
+    route = decodeGooglePolyline(params.encodedPolyline);
+  } catch {
+    throw new HttpsError("failed-precondition", "This ride route is unavailable.");
+  }
+  const [pickup, dropoff, maximumDetourMiles, boundaryExceptions] = await Promise.all([
+    bookingPlace(params.pickupPlaceId),
+    bookingPlace(params.dropoffPlaceId),
+    remoteNumber("max_route_detour_miles"),
+    rideBoundaryRings(),
+  ]);
+  const pickupMatch = routePointAllowed({
+    point: pickup,
+    route,
+    maximumDetourMiles,
+    boundaryExceptions,
+  });
+  const dropoffMatch = routePointAllowed({
+    point: dropoff,
+    route,
+    maximumDetourMiles,
+    boundaryExceptions,
+  });
+  if (!pickupMatch.allowed || !dropoffMatch.allowed) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Pickup and drop-off must be within 1 mile of the driver’s route or inside the approved boundary.",
+    );
+  }
+  if (pickupMatch.progress > dropoffMatch.progress) {
+    throw new HttpsError("failed-precondition", "Drop-off must come after pickup on this route.");
+  }
+  return {pickup, dropoff};
+}
+
 async function notify(userId: string, type: string, data: Json): Promise<void> {
   await db.collection("notifications").add({
     userId,
@@ -254,18 +439,44 @@ async function notify(userId: string, type: string, data: Json): Promise<void> {
 }
 
 export const requestSeat = onCall(
-  {region, enforceAppCheck: true, maxInstances: 60},
+  {
+    region,
+    enforceAppCheck: true,
+    secrets: [googleMapsApiKey],
+    maxInstances: 60,
+    timeoutSeconds: 30,
+  },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
     const profile = await requireVerifiedUser(request.auth.uid);
-    const rideId = stringValue(object(request.data).rideId, "Ride", 128);
+    const requestData = object(request.data);
+    const rideId = stringValue(requestData.rideId, "Ride", 128);
+    const selectedSeat = seatKey(requestData.seatKey);
+    const pickupPlaceId = stringValue(requestData.pickupPlaceId, "Pickup address", 300);
+    const dropoffPlaceId = stringValue(requestData.dropoffPlaceId, "Drop-off address", 300);
     const rideReference = db.collection("rides").doc(rideId);
     const reference = db.collection("bookings").doc(bookingId(rideId, request.auth.uid));
+    const initialRide = (await rideReference.get()).data();
+    if (!initialRide || initialRide.status !== "published") {
+      throw new HttpsError("failed-precondition", "That ride is no longer available.");
+    }
+    const stops = await validatedBookingStops({
+      encodedPolyline: initialRide.encodedPolyline,
+      pickupPlaceId,
+      dropoffPlaceId,
+    });
     let driverId = "";
     await db.runTransaction(async (transaction) => {
-      const [rideSnapshot, existingSnapshot] = await Promise.all([
+      const initialDriverId = String(initialRide.driverId ?? "");
+      const riderBlockReference = db.collection("users").doc(request.auth!.uid)
+        .collection("blockedUsers").doc(initialDriverId);
+      const driverBlockReference = db.collection("users").doc(initialDriverId)
+        .collection("blockedUsers").doc(request.auth!.uid);
+      const [rideSnapshot, existingSnapshot, riderBlock, driverBlock] = await Promise.all([
         transaction.get(rideReference),
         transaction.get(reference),
+        transaction.get(riderBlockReference),
+        transaction.get(driverBlockReference),
       ]);
       const ride = rideSnapshot.data();
       if (!ride || ride.status !== "published" || Number(ride.seatsAvailable ?? 0) < 1) {
@@ -273,6 +484,15 @@ export const requestSeat = onCall(
       }
       if (ride.driverId === request.auth?.uid) {
         throw new HttpsError("failed-precondition", "You cannot request your own ride.");
+      }
+      if (riderBlock.exists || driverBlock.exists) {
+        throw new HttpsError("permission-denied", "This ride is not available to you.");
+      }
+      if (!canRequestGenderRestrictedRide(ride.genderRestriction, profile.gender)) {
+        throw new HttpsError(
+          "permission-denied",
+          "This ride accepts requests from women riders only.",
+        );
       }
       const existingStatus = existingSnapshot.data()?.status as BookingStatus | undefined;
       if (existingStatus && !["declined", "expired", "cancelled", "lost_seat"]
@@ -292,8 +512,13 @@ export const requestSeat = onCall(
         riderPhotoUrl: String(profile.photoUrl ?? ""),
         driverId,
         driverName: String(ride.driverName ?? ""),
+        driverPhotoUrl: String(ride.driverPhotoUrl ?? ""),
         originName: object(ride.origin).displayName,
         destinationName: object(ride.destination).displayName,
+        seatKey: selectedSeat,
+        seatLabel: seatLabel(selectedSeat),
+        pickupLocation: stops.pickup,
+        dropoffLocation: stops.dropoff,
         departureAt: ride.departureAt,
         baseFareCents: Number(ride.pricePerSeatCents),
         status: "pending_driver" satisfies BookingStatus,
@@ -399,9 +624,23 @@ export const createBookingPayment = onCall(
       booking.paymentIntentId : "";
     let intent: Stripe.PaymentIntent | null = null;
     if (existingIntentId) {
-      intent = await stripe().paymentIntents.retrieve(existingIntentId);
+      try {
+        intent = await stripe().paymentIntents.retrieve(existingIntentId);
+      } catch (error) {
+        if (!isStripeResourceMissing(error)) throw error;
+        logger.info("Replacing a payment intent from a previous test account.", {
+          bookingId: id,
+        });
+        existingIntentId = "";
+        await reference.update({
+          paymentIntentId: FieldValue.delete(),
+          paymentStatus: "",
+          status: "accepted_payment_pending" satisfies BookingStatus,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
       const previousMethod = typeof booking.paymentMethod === "string" ? booking.paymentMethod : "card";
-      if (previousMethod !== paymentMethod && !["canceled", "succeeded"].includes(intent.status)) {
+      if (intent && previousMethod !== paymentMethod && !["canceled", "succeeded"].includes(intent.status)) {
         await stripe().paymentIntents.cancel(intent.id);
         existingIntentId = "";
       }
@@ -435,7 +674,7 @@ export const createBookingPayment = onCall(
     }
     return {
       clientSecret: intent.client_secret,
-      publishableKey: stripePublishableKey.value(),
+      publishableKey: stripePublishableKey.value().trim(),
       customerId: customer.customerId,
       ephemeralKeySecret: customer.ephemeralKeySecret,
       allowsDelayedPaymentMethods: paymentMethod === "bank",
@@ -485,21 +724,27 @@ export const createPaymentMethodSetup = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
     await requireVerifiedUser(request.auth.uid);
+    const data = object(request.data);
+    const paymentMethod = data.paymentMethod === "bank" ? "bank" : "card";
     const customer = await customerSession(request.auth.uid);
     const intent = await stripe().setupIntents.create({
       customer: customer.customerId,
-      payment_method_types: ["card", "us_bank_account"],
+      payment_method_types: [paymentMethod === "bank" ? "us_bank_account" : "card"],
       usage: "off_session",
-      metadata: {sidecarUid: request.auth.uid},
-    }, {idempotencyKey: `payment-method-setup-${request.auth.uid}-${Date.now()}`});
+      metadata: {sidecarUid: request.auth.uid, paymentMethod},
+    }, {
+      idempotencyKey:
+        `payment-method-setup-${request.auth.uid}-${paymentMethod}-${Date.now()}`,
+    });
     if (!intent.client_secret) {
       throw new HttpsError("internal", "Payment setup could not be initialized.");
     }
     return {
       clientSecret: intent.client_secret,
-      publishableKey: stripePublishableKey.value(),
+      publishableKey: stripePublishableKey.value().trim(),
       customerId: customer.customerId,
       ephemeralKeySecret: customer.ephemeralKeySecret,
+      allowsDelayedPaymentMethods: paymentMethod === "bank",
       merchantDisplayName: "SideCar",
     };
   },
@@ -511,9 +756,17 @@ export const listPaymentMethods = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
     await requireVerifiedUser(request.auth.uid);
     const customerId = await stripeCustomerId(request.auth.uid);
-    const [cards, banks] = await Promise.all([
-      stripe().paymentMethods.list({customer: customerId, type: "card", limit: 20}),
-      stripe().paymentMethods.list({customer: customerId, type: "us_bank_account", limit: 20}),
+    const [cards, bankAccounts] = await Promise.all([
+      stripe().paymentMethods.list({
+        customer: customerId,
+        type: "card",
+        limit: 20,
+      }),
+      stripe().paymentMethods.list({
+        customer: customerId,
+        type: "us_bank_account",
+        limit: 20,
+      }),
     ]);
     return {
       methods: [
@@ -524,7 +777,7 @@ export const listPaymentMethods = onCall(
           detail: method.card?.exp_month && method.card?.exp_year ?
             `Expires ${String(method.card.exp_month).padStart(2, "0")}/${String(method.card.exp_year).slice(-2)}` : "",
         })),
-        ...banks.data.map((method) => ({
+        ...bankAccounts.data.map((method) => ({
           id: method.id,
           type: "bank",
           label: `${method.us_bank_account?.bank_name ?? "Bank account"} •${method.us_bank_account?.last4 ?? ""}`,
@@ -656,7 +909,7 @@ export const stripePaymentsWebhook = onRequest(
       event = stripe().webhooks.constructEvent(
         request.rawBody,
         signature,
-        stripePaymentsWebhookSecret.value(),
+        stripePaymentsWebhookSecret.value().trim(),
       );
     } catch {
       response.status(400).send("Invalid signature");
@@ -701,9 +954,16 @@ export const listMyBookings = onCall(
       .orderBy("createdAt", "desc")
       .limit(100)
       .get();
+    const photos = await currentProfilePhotos(
+      snapshot.docs.map((document) => String(document.data().driverId ?? "")),
+    );
     return {
-      bookings: snapshot.docs.map((document) =>
-        bookingJson(document.id, document.data(), request.auth!.uid)),
+      bookings: snapshot.docs.map((document) => {
+        const booking = document.data();
+        return bookingJson(document.id, booking, request.auth!.uid, {
+          driver: photos.get(String(booking.driverId ?? "")),
+        });
+      }),
     };
   },
 );
@@ -720,8 +980,16 @@ export const listRideRequests = onCall(
       .where("driverId", "==", request.auth.uid);
     if (rideId) query = query.where("rideId", "==", rideId);
     const snapshot = await query.limit(200).get();
+    const photos = await currentProfilePhotos(
+      snapshot.docs.map((document) => String(document.data().riderId ?? "")),
+    );
     const bookings = snapshot.docs
-      .map((document) => bookingJson(document.id, document.data(), request.auth!.uid))
+      .map((document) => {
+        const booking = document.data();
+        return bookingJson(document.id, booking, request.auth!.uid, {
+          rider: photos.get(String(booking.riderId ?? "")),
+        });
+      })
       .sort((left, right) => Date.parse(String(left.departureAt)) - Date.parse(String(right.departureAt)));
     return {bookings};
   },
@@ -754,6 +1022,7 @@ async function transferDriverShare(params: {
   amountCents: number;
   reason: string;
   attempt: number;
+  sourceTransaction?: string;
 }): Promise<string> {
   if (params.amountCents <= 0) return "";
   const accountId = await connectedAccountId(params.driverId);
@@ -771,7 +1040,7 @@ async function transferDriverShare(params: {
     });
     return "";
   }
-  const transfer = await stripe().transfers.create({
+  const transferParams: Stripe.TransferCreateParams = {
     amount: params.amountCents,
     currency: "usd",
     destination: accountId,
@@ -781,9 +1050,168 @@ async function transferDriverShare(params: {
       rideId: params.rideId,
       reason: params.reason,
     },
-  }, {idempotencyKey: `${params.reason}-transfer-${params.bookingId}-${params.attempt}`});
+  };
+  if (params.sourceTransaction) {
+    transferParams.source_transaction = params.sourceTransaction;
+  }
+  const transfer = await stripe().transfers.create(
+    transferParams,
+    {idempotencyKey: `${params.reason}-transfer-${params.bookingId}-${params.attempt}`},
+  );
   return transfer.id;
 }
+
+const removableBookingStatuses = new Set<BookingStatus>([
+  "pending_driver",
+  "accepted_payment_pending",
+  "payment_processing",
+  "confirmed",
+  "cancellation_processing",
+]);
+
+async function bookingsBetweenUsers(firstUid: string, secondUid: string) {
+  const [asDriver, asRider] = await Promise.all([
+    db.collection("bookings").where("driverId", "==", firstUid).limit(200).get(),
+    db.collection("bookings").where("riderId", "==", firstUid).limit(200).get(),
+  ]);
+  const matches = [...asDriver.docs, ...asRider.docs].filter((document) => {
+    const booking = document.data();
+    const pairMatches =
+      (booking.driverId === firstUid && booking.riderId === secondUid) ||
+      (booking.riderId === firstUid && booking.driverId === secondUid);
+    return pairMatches && removableBookingStatuses.has(booking.status as BookingStatus);
+  });
+  return [...new Map(matches.map((document) => [document.id, document])).values()];
+}
+
+async function removeBookingForSafety(
+  document: FirebaseFirestore.QueryDocumentSnapshot,
+): Promise<boolean> {
+  const reference = document.ref;
+  let booking = (await reference.get()).data();
+  if (!booking) return false;
+  let status = booking.status as BookingStatus;
+
+  if (status === "payment_processing" && typeof booking.paymentIntentId === "string") {
+    const intent = await stripe().paymentIntents.retrieve(booking.paymentIntentId);
+    if (intent.status === "succeeded") {
+      await confirmPaidBooking(intent);
+      booking = (await reference.get()).data();
+      status = booking?.status as BookingStatus;
+    } else {
+      if (intent.status !== "canceled") await stripe().paymentIntents.cancel(intent.id);
+      await reference.update({
+        status: "cancelled" satisfies BookingStatus,
+        cancelledBy: "safety_block",
+        paymentStatus: "cancelled",
+        driverPayoutCents: 0,
+        payoutStatus: "cancelled",
+        cancelledAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return true;
+    }
+  }
+
+  if (["pending_driver", "accepted_payment_pending"].includes(status)) {
+    await reference.update({
+      status: "cancelled" satisfies BookingStatus,
+      cancelledBy: "safety_block",
+      driverPayoutCents: 0,
+      payoutStatus: "cancelled",
+      cancelledAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return true;
+  }
+
+  if (status === "confirmed") {
+    const rideReference = db.collection("rides").doc(String(booking?.rideId));
+    await db.runTransaction(async (transaction) => {
+      const [currentBooking, currentRide] = await Promise.all([
+        transaction.get(reference),
+        transaction.get(rideReference),
+      ]);
+      if (currentBooking.data()?.status !== "confirmed") return;
+      transaction.update(reference, {
+        status: "cancellation_processing" satisfies BookingStatus,
+        cancelledBy: "safety_block",
+        cancellationStartedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      if (currentRide.exists) {
+        const ride = currentRide.data()!;
+        const seatsTotal = Math.max(0, Number(ride.seatsTotal ?? 0));
+        const bookedSeats = Math.max(0, Number(ride.bookedSeats ?? 0) - 1);
+        transaction.update(rideReference, {
+          seatsAvailable: Math.min(
+            seatsTotal,
+            Math.max(0, Number(ride.seatsAvailable ?? 0) + 1),
+          ),
+          bookedSeats,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    });
+    booking = (await reference.get()).data();
+    status = booking?.status as BookingStatus;
+  }
+
+  if (status === "cancellation_processing" &&
+      booking?.cancelledBy === "safety_block" &&
+      typeof booking.paymentIntentId === "string") {
+    await stripe().refunds.create(
+      {payment_intent: booking.paymentIntentId},
+      {idempotencyKey: `safety-block-refund-${document.id}`},
+    );
+    await reference.update({
+      status: "refunded" satisfies BookingStatus,
+      paymentStatus: "refunded",
+      refundReason: "safety_block",
+      driverPayoutCents: 0,
+      payoutStatus: "cancelled",
+      refundedAt: FieldValue.serverTimestamp(),
+      cancelledAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return true;
+  }
+  return false;
+}
+
+export const blockUser = onCall(
+  {
+    region,
+    enforceAppCheck: true,
+    secrets: [stripePaymentsSecretKey],
+    maxInstances: 20,
+    timeoutSeconds: 120,
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    const targetUserId = stringValue(object(request.data).targetUserId, "User", 128);
+    if (targetUserId === request.auth.uid) {
+      throw new HttpsError("invalid-argument", "You cannot block yourself.");
+    }
+    try {
+      await auth.getUser(targetUserId);
+    } catch {
+      throw new HttpsError("not-found", "That user is unavailable.");
+    }
+    await db.collection("users").doc(request.auth.uid)
+      .collection("blockedUsers").doc(targetUserId).set({
+        blockedUserId: targetUserId,
+        createdAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+
+    const bookings = await bookingsBetweenUsers(request.auth.uid, targetUserId);
+    let removedBookings = 0;
+    for (const booking of bookings) {
+      if (await removeBookingForSafety(booking)) removedBookings += 1;
+    }
+    return {blocked: true, removedBookings};
+  },
+);
 
 export const cancelSeatBooking = onCall(
   {region, enforceAppCheck: true, secrets: [stripePaymentsSecretKey], maxInstances: 30, timeoutSeconds: 60},
@@ -811,6 +1239,8 @@ export const cancelSeatBooking = onCall(
       await reference.update({
         status: "cancelled" satisfies BookingStatus,
         cancelledBy: "rider",
+        driverPayoutCents: 0,
+        payoutStatus: "cancelled",
         cancelledAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -874,12 +1304,17 @@ export const cancelSeatBooking = onCall(
       amountCents: allocation.driverCents,
       reason: "rider_cancellation",
       attempt: 1,
+      sourceTransaction: typeof booking.chargeId === "string" ? booking.chargeId : undefined,
     });
     await Promise.all([
       reference.update({
         status: "cancelled" satisfies BookingStatus,
         paymentStatus: allocation.riderRefundCents === totalCents ? "refunded" : "partially_refunded",
         cancellationTransferId: transferId,
+        driverPayoutCents: allocation.driverCents,
+        payoutStatus: allocation.driverCents > 0 ?
+          (transferId ? "paid" : "account_required") : "cancelled",
+        paidOutAt: transferId ? FieldValue.serverTimestamp() : null,
         cancelledAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       }),
@@ -924,6 +1359,8 @@ export const cancelDriverRide = onCall(
         batch.update(document.ref, {
           status: "cancelled" satisfies BookingStatus,
           cancelledBy: "driver",
+          driverPayoutCents: 0,
+          payoutStatus: "cancelled",
           cancelledAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp(),
         });
@@ -952,6 +1389,9 @@ export const cancelDriverRide = onCall(
           "refunded" satisfies BookingStatus : "cancelled" satisfies BookingStatus,
         paymentStatus: intent.status === "succeeded" ? "refunded" : "cancelled",
         cancelledBy: "driver",
+        driverPayoutCents: 0,
+        payoutStatus: "cancelled",
+        paidOutAt: null,
         refundReason: "driver_cancelled",
         cancelledAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
@@ -1017,7 +1457,9 @@ async function completeAndPayBooking(
       booking = current;
       return;
     }
-    if (current.status !== "in_progress") return;
+    const isFailedPayoutRetry = current.status === "payout_held" &&
+      current.payoutStatus === "failed";
+    if (current.status !== "in_progress" && !isFailedPayoutRetry) return;
     const completionAt = current.estimatedCompletionAt as Timestamp | undefined;
     if (!completionAt || completionAt.toMillis() > Date.now()) return;
     const payoutAttempt = Math.max(0, Number(current.payoutAttempt ?? 0)) + 1;
@@ -1039,6 +1481,7 @@ async function completeAndPayBooking(
       amountCents: Number(booking.driverPayoutCents ?? booking.baseFareCents),
       reason: "trip_completion",
       attempt: Number(booking.payoutAttempt ?? 1),
+      sourceTransaction: typeof booking.chargeId === "string" ? booking.chargeId : undefined,
     });
     await reference.update({
       status: "completed" satisfies BookingStatus,
@@ -1266,6 +1709,15 @@ export const settleTrips = onSchedule(
       .limit(250)
       .get();
     for (const document of ready.docs) await completeAndPayBooking(document.ref);
+
+    const failedPayouts = await db.collection("bookings")
+      .where("status", "==", "payout_held")
+      .where("payoutStatus", "==", "failed")
+      .limit(100)
+      .get();
+    for (const document of failedPayouts.docs) {
+      await completeAndPayBooking(document.ref);
+    }
 
     const autoCompleteHours = await remoteNumber("trip_auto_complete_hours");
     const missingCodeCutoff = Timestamp.fromMillis(Date.now() - autoCompleteHours * 3_600_000);

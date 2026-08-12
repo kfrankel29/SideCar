@@ -5,6 +5,7 @@ import 'package:sidecar/src/core/platform/app_haptics.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/profile/presentation/account_profile_screen.dart';
+import 'package:sidecar/src/features/navigation/domain/tab_activation.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/features/rides/presentation/driver_ride_screens.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_search_screens.dart';
@@ -28,6 +29,7 @@ class MainTabShell extends ConsumerWidget {
         selectedIndex: navigationShell.currentIndex,
         onSelected: (index) {
           AppHaptics.tap();
+          ref.read(mainTabActivationProvider.notifier).activate(index);
           navigationShell.goBranch(
             index,
             initialLocation: index == navigationShell.currentIndex,

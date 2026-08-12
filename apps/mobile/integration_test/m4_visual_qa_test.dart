@@ -4,17 +4,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:sidecar/src/features/auth/data/firebase_auth_repository.dart';
+import 'package:sidecar/src/features/auth/domain/account_user.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/bookings/presentation/payment_screens.dart';
+import 'package:sidecar/src/features/profile/domain/public_profile.dart';
+import 'package:sidecar/src/features/profile/domain/public_profile_repository.dart';
+import 'package:sidecar/src/features/profile/presentation/public_profile_screen.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/driver_ride_screens.dart';
+import 'package:sidecar/src/features/rides/presentation/ride_details_screen.dart';
+import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   final repository = _M4VisualRepository();
+  const holdForExternalCapture = bool.fromEnvironment('M4_QA_HOLD');
+  const holdSeconds = int.fromEnvironment(
+    'M4_QA_HOLD_SECONDS',
+    defaultValue: 30,
+  );
+  const focusedScreen = String.fromEnvironment('M4_QA_SCREEN');
 
   testWidgets('captures the Milestone 4 Final Draft payment screens', (
     tester,
@@ -26,12 +40,23 @@ void main() {
       'm4-payment-history': const PaymentHistoryScreen(),
       'm4-payout-methods': const PayoutMethodsScreen(),
       'm4-payout-history': const PayoutHistoryScreen(),
+      'm4-rider-my-rides': const RiderMyRidesScreen(),
+      'm4-public-profile': const PublicProfileScreen(userId: 'rider-m4'),
     };
 
     for (final entry in screens.entries) {
+      if (focusedScreen.isNotEmpty && entry.key != focusedScreen) {
+        continue;
+      }
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [bookingRepositoryProvider.overrideWithValue(repository)],
+          overrides: [
+            bookingRepositoryProvider.overrideWithValue(repository),
+            publicProfileRepositoryProvider.overrideWithValue(
+              const _M4PublicProfileRepository(),
+            ),
+            safetyRepositoryProvider.overrideWithValue(_M4SafetyRepository()),
+          ],
           child: MaterialApp(
             debugShowCheckedModeBanner: false,
             theme: AppTheme.light,
@@ -45,6 +70,51 @@ void main() {
       final file = File('${Directory.systemTemp.path}/${entry.key}.png');
       await file.writeAsBytes(bytes, flush: true);
       debugPrint('QA_SCREENSHOT=${file.path}');
+      if (holdForExternalCapture) {
+        await Future<void>.delayed(Duration(seconds: holdSeconds));
+      }
+    }
+  });
+
+  testWidgets('captures seat selection and the exact-stop request sheet', (
+    tester,
+  ) async {
+    if (focusedScreen.isNotEmpty && focusedScreen != 'm4-seat-request-stops') {
+      return;
+    }
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(const _M4AuthRepository()),
+          bookingRepositoryProvider.overrideWithValue(repository),
+          rideRepositoryProvider.overrideWithValue(
+            _M4RideRepository([_publishedRide()]),
+          ),
+        ],
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          home: const RideDetailsScreen(rideId: 'ride-m4'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Left'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rear left seat · 3 of 3 left'), findsOneWidget);
+    await tester.tap(find.text('Request seat'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confirm your stops'), findsOneWidget);
+    expect(find.text('Choose pickup address'), findsOneWidget);
+    expect(find.text('Choose drop-off address'), findsOneWidget);
+    expect(find.textContaining('within 1 mile'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    final bytes = await binding.takeScreenshot('m4-seat-request-stops');
+    final file = File('${Directory.systemTemp.path}/m4-seat-request-stops.png');
+    await file.writeAsBytes(bytes, flush: true);
+    debugPrint('QA_SCREENSHOT=${file.path}');
+    if (holdForExternalCapture) {
+      await Future<void>.delayed(Duration(seconds: holdSeconds));
     }
   });
 
@@ -79,19 +149,27 @@ void main() {
 
     await show(BookingCheckoutScreen(booking: _booking()));
     expect(find.text(r'Pay $55.92'), findsOneWidget);
-    await tester.tap(find.text('ACH Payment'));
-    await tester.pumpAndSettle();
-    expect(interactionRepository.lastQuotedMethod, BookingPaymentMethod.bank);
-    expect(find.text(r'Pay $54.40'), findsOneWidget);
-    await tester.tap(find.text(r'Pay $54.40'));
+    expect(find.text('ACH Payment'), findsNothing);
+    expect(interactionRepository.lastQuotedMethod, BookingPaymentMethod.card);
+    await tester.tap(find.text(r'Pay $55.92'));
     await tester.pumpAndSettle();
     expect(interactionRepository.lastPaidBookingId, 'booking-m4');
-    expect(interactionRepository.lastPaidMethod, BookingPaymentMethod.bank);
+    expect(interactionRepository.lastPaidMethod, BookingPaymentMethod.card);
 
     await show(const PaymentMethodsScreen());
+    expect(find.text('ACH Payment'), findsNothing);
+    interactionRepository.paymentMethodAdded = false;
     await tester.tap(find.text('Add payment method'));
     await tester.pumpAndSettle();
     expect(interactionRepository.addPaymentMethodCalls, 1);
+    expect(interactionRepository.listPaymentMethodCalls, 1);
+    expect(find.text('Payment method added.'), findsNothing);
+
+    interactionRepository.paymentMethodAdded = true;
+    await tester.tap(find.text('Add payment method'));
+    await tester.pumpAndSettle();
+    expect(interactionRepository.addPaymentMethodCalls, 2);
+    expect(interactionRepository.lastAddedMethod, BookingPaymentMethod.card);
     expect(interactionRepository.listPaymentMethodCalls, 2);
 
     await show(const PaymentHistoryScreen());
@@ -104,9 +182,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
+    interactionRepository.rideRequests = [
+      _booking(),
+      _booking(status: 'cancelled', payoutStatus: ''),
+    ];
     await show(const PayoutHistoryScreen());
     expect(find.text('PAYOUT BALANCE'), findsOneWidget);
     expect(find.text(r'$450.00'), findsOneWidget);
+    expect(
+      find.text('Pardall Rd → Palo Alto'),
+      findsOneWidget,
+      reason: 'Cancelled or refunded bookings are not driver payouts.',
+    );
 
     await show(PickupCodeScreen(booking: _booking()));
     expect(find.text('YOUR PICKUP CODE:'), findsOneWidget);
@@ -164,6 +251,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('0/3 booked'), findsOneWidget);
+    expect(find.text('Cancel ride'), findsNothing);
+    expect(find.text('Share link'), findsNothing);
     final bytes = await binding.takeScreenshot('m4-cancelled-ride-count');
     final file = File(
       '${Directory.systemTemp.path}/m4-cancelled-ride-count.png',
@@ -173,7 +262,28 @@ void main() {
   });
 }
 
-SeatBooking _booking({String status = 'confirmed'}) => SeatBooking.fromJson({
+class _M4SafetyRepository implements SafetyRepository {
+  @override
+  Future<bool> isBlocked(String targetUserId) async => false;
+
+  @override
+  Future<void> blockUser(String targetUserId) async {}
+
+  @override
+  Future<void> unblockUser(String targetUserId) async {}
+
+  @override
+  Future<void> reportUser({
+    required String targetUserId,
+    required SafetyReportReason reason,
+    String details = '',
+  }) async {}
+}
+
+SeatBooking _booking({
+  String status = 'confirmed',
+  String payoutStatus = 'paid',
+}) => SeatBooking.fromJson({
   'id': 'booking-m4',
   'rideId': 'ride-m4',
   'riderId': 'rider-m4',
@@ -191,9 +301,24 @@ SeatBooking _booking({String status = 'confirmed'}) => SeatBooking.fromJson({
   'processingFeeCents': 192,
   'totalCents': 5592,
   'paymentStatus': 'paid',
-  'payoutStatus': 'paid',
+  'payoutStatus': payoutStatus,
   'driverPayoutCents': 5000,
   'pickupCode': '0909',
+  'seatKey': 'front',
+  'pickupLocation': {
+    'placeId': 'pickup-m4',
+    'displayName': 'Pardall Road',
+    'formattedAddress': 'Pardall Road, Isla Vista, CA 93117',
+    'latitude': 34.4138,
+    'longitude': -119.8556,
+  },
+  'dropoffLocation': {
+    'placeId': 'dropoff-m4',
+    'displayName': 'Palo Alto Caltrain',
+    'formattedAddress': '95 University Avenue, Palo Alto, CA 94301',
+    'latitude': 37.4434,
+    'longitude': -122.1646,
+  },
 });
 
 Ride _cancelledRide() => Ride.fromJson({
@@ -211,6 +336,69 @@ Ride _cancelledRide() => Ride.fromJson({
   'pricePerSeatCents': 5000,
   'status': 'cancelled',
 });
+
+Ride _publishedRide() => Ride.fromJson({
+  'id': 'ride-m4',
+  'driverId': 'driver-m4',
+  'driverName': 'Jordan Taylor',
+  'driverInitials': 'JT',
+  'driverGender': 'Male',
+  'driverRating': 4.9,
+  'driverTrips': 12,
+  'vehicle': {'makeAndModel': 'Honda Civic'},
+  'origin': {
+    'placeId': 'pickup-m4',
+    'displayName': 'Pardall Rd',
+    'latitude': 34.4138,
+    'longitude': -119.8556,
+  },
+  'destination': {
+    'placeId': 'dropoff-m4',
+    'displayName': 'Palo Alto',
+    'latitude': 37.4434,
+    'longitude': -122.1646,
+  },
+  'departureAt': '2026-08-12T22:00:00.000Z',
+  'seatsTotal': 3,
+  'seatsAvailable': 3,
+  'pricePerSeatCents': 5000,
+  'luggageAllowance': 'one_suitcase',
+  'genderRestriction': 'any',
+  'status': 'published',
+  'encodedPolyline': r'_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+});
+
+class _M4AuthRepository extends UnavailableAuthRepository {
+  const _M4AuthRepository();
+
+  static const _user = AccountUser(
+    id: 'rider-m4',
+    email: 'rider@ucsb.edu',
+    emailVerified: true,
+  );
+
+  @override
+  AccountUser get currentUser => _user;
+
+  @override
+  Stream<AccountUser?> authStateChanges() => Stream.value(_user);
+}
+
+class _M4PublicProfileRepository implements PublicProfileRepository {
+  const _M4PublicProfileRepository();
+
+  @override
+  Future<PublicProfile> getProfile(String userId) async => PublicProfile(
+    userId: userId,
+    displayName: 'Maya Chen',
+    photoUrl: '',
+    age: 20,
+    gender: 'Female',
+    language: 'English',
+    rating: 4.8,
+    tripCount: 6,
+  );
+}
 
 class _M4VisualRepository extends UnavailableBookingRepository {
   @override
@@ -261,7 +449,9 @@ class _M4InteractionRepository extends _M4VisualRepository {
   BookingPaymentMethod? lastPaidMethod;
   String? lastPaidBookingId;
   int addPaymentMethodCalls = 0;
+  BookingPaymentMethod? lastAddedMethod;
   int listPaymentMethodCalls = 0;
+  bool paymentMethodAdded = true;
   int forcedBookingRefreshes = 0;
   List<SeatBooking> myBookings = [_booking()];
   List<SeatBooking> rideRequests = [_booking()];
@@ -288,8 +478,12 @@ class _M4InteractionRepository extends _M4VisualRepository {
   }
 
   @override
-  Future<void> addPaymentMethod() async {
+  Future<bool> addPaymentMethod([
+    BookingPaymentMethod method = BookingPaymentMethod.card,
+  ]) async {
     addPaymentMethodCalls += 1;
+    lastAddedMethod = method;
+    return paymentMethodAdded;
   }
 
   @override
@@ -326,6 +520,9 @@ class _M4InteractionRepository extends _M4VisualRepository {
 }
 
 class _M4RideRepository implements RideRepository {
+  @override
+  void invalidateRide(String rideId) {}
+
   _M4RideRepository([this.rides = const []]);
 
   final List<Ride> rides;
@@ -340,7 +537,12 @@ class _M4RideRepository implements RideRepository {
   @override
   Future<Ride> createRide(RideDraft draft) async => _unused();
   @override
-  Future<Ride> getRide(String rideId) async => _unused();
+  Future<Ride> getRide(String rideId) async {
+    final match = rides.where((ride) => ride.id == rideId);
+    if (match.isNotEmpty) return match.first;
+    return _publishedRide();
+  }
+
   @override
   Future<List<Ride>> listLeavingSoon({bool forceRefresh = false}) async =>
       _unused();

@@ -3,7 +3,7 @@ import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 
 abstract interface class BookingRepository {
-  Future<SeatBooking> requestSeat(String rideId);
+  Future<SeatBooking> requestSeat(SeatRequest request);
   Future<SeatBooking> respondToRequest(
     String bookingId, {
     required bool accept,
@@ -23,7 +23,9 @@ abstract interface class BookingRepository {
     BookingPaymentMethod method,
   );
   Future<List<SavedPaymentMethod>> listPaymentMethods();
-  Future<void> addPaymentMethod();
+  Future<bool> addPaymentMethod([
+    BookingPaymentMethod method = BookingPaymentMethod.card,
+  ]);
   Future<void> cancelBooking(String bookingId);
   Future<void> cancelDriverRide(String rideId);
   Future<void> verifyPickupCode(String bookingId, String code);
@@ -44,7 +46,9 @@ class UnavailableBookingRepository implements BookingRepository {
   @override
   Future<void> cancelBooking(String bookingId) async => _notReady();
   @override
-  Future<void> addPaymentMethod() async => _notReady();
+  Future<bool> addPaymentMethod([
+    BookingPaymentMethod method = BookingPaymentMethod.card,
+  ]) async => _notReady();
   @override
   Future<void> cancelDriverRide(String rideId) async => _notReady();
   @override
@@ -79,7 +83,7 @@ class UnavailableBookingRepository implements BookingRepository {
   @override
   Future<SeatBooking> refreshBooking(String bookingId) async => _notReady();
   @override
-  Future<SeatBooking> requestSeat(String rideId) async => _notReady();
+  Future<SeatBooking> requestSeat(SeatRequest request) async => _notReady();
   @override
   Future<SeatBooking> respondToRequest(
     String bookingId, {

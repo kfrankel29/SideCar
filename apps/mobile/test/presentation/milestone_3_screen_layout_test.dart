@@ -233,7 +233,7 @@ void main() {
       MaterialApp(theme: AppTheme.light, home: const SearchRidesScreen()),
     );
 
-    await tester.tap(find.text('Women only'));
+    await tester.tap(find.byType(Switch));
     await tester.tap(find.text('Luggage'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('1 suitcase').last);
@@ -257,8 +257,9 @@ void main() {
         .toSet();
     expect(
       selected,
-      containsAll(<String>{'Women only', 'Luggage', 'Language', '4.8+ rating'}),
+      containsAll(<String>{'Luggage', 'Language', '4.8+ rating'}),
     );
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
     expect(tester.takeException(), isNull);
   });
 
@@ -364,7 +365,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Your upcoming ride'), findsOneWidget);
+    expect(find.text('Your upcoming rides'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -461,6 +462,9 @@ void main() {
 }
 
 class _PlacesOnlyRepository implements RideRepository {
+  @override
+  void invalidateRide(String rideId) {}
+
   @override
   Future<void> cancelRide(String rideId) async {}
 

@@ -5,6 +5,7 @@ class AsyncTtlCache<T> {
   T? _value;
   DateTime? _expiresAt;
   Future<T>? _pending;
+  int _requestVersion = 0;
 
   Future<T> get(
     Duration duration,
@@ -21,21 +22,28 @@ class AsyncTtlCache<T> {
     }
 
     final pending = _pending;
-    if (pending != null) return pending;
+    if (!forceRefresh && pending != null) return pending;
 
+    final requestVersion = ++_requestVersion;
     final request = loader();
     _pending = request;
     return request
         .then((result) {
-          _value = result;
-          _expiresAt = _now().add(duration);
+          if (requestVersion == _requestVersion) {
+            _value = result;
+            _expiresAt = _now().add(duration);
+          }
           return result;
         })
-        .whenComplete(() => _pending = null);
+        .whenComplete(() {
+          if (requestVersion == _requestVersion) _pending = null;
+        });
   }
 
   void clear() {
     _value = null;
     _expiresAt = null;
+    _pending = null;
+    _requestVersion++;
   }
 }

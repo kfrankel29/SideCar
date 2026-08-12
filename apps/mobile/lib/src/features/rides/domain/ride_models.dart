@@ -186,6 +186,39 @@ class Ride {
   final bool repeatWeekly;
   final String recurrenceId;
 
+  Ride copyWith({int? seatsAvailable, int? bookedSeats, String? status}) {
+    return Ride(
+      id: id,
+      driverId: driverId,
+      driverName: driverName,
+      driverInitials: driverInitials,
+      driverPhotoUrl: driverPhotoUrl,
+      driverGender: driverGender,
+      driverLanguage: driverLanguage,
+      driverRating: driverRating,
+      driverTrips: driverTrips,
+      vehicle: vehicle,
+      origin: origin,
+      destination: destination,
+      departureAt: departureAt,
+      distanceMiles: distanceMiles,
+      durationSeconds: durationSeconds,
+      seatsTotal: seatsTotal,
+      seatsAvailable: seatsAvailable ?? this.seatsAvailable,
+      bookedSeats: bookedSeats ?? this.bookedSeats,
+      pricePerSeatCents: pricePerSeatCents,
+      maximumPriceCents: maximumPriceCents,
+      luggageAllowance: luggageAllowance,
+      genderRestriction: genderRestriction,
+      status: status ?? this.status,
+      shareUrl: shareUrl,
+      mapPreviewUrl: mapPreviewUrl,
+      encodedPolyline: encodedPolyline,
+      repeatWeekly: repeatWeekly,
+      recurrenceId: recurrenceId,
+    );
+  }
+
   String get priceLabel {
     final dollars = pricePerSeatCents / 100;
     return dollars == dollars.roundToDouble()

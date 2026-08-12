@@ -216,6 +216,9 @@ Widget _testApp(AuthRepository auth, ProfileRepository profiles) {
 }
 
 class _EmptyRideRepository implements RideRepository {
+  @override
+  void invalidateRide(String rideId) {}
+
   const _EmptyRideRepository();
 
   @override

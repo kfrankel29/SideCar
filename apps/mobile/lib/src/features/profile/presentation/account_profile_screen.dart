@@ -171,7 +171,7 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
                 _ProfileRow(
                   icon: Icons.credit_card_outlined,
                   title: 'Payment methods',
-                  subtitle: 'Cards and ACH bank accounts',
+                  subtitle: 'Cards stored securely by Stripe',
                   onTap: () => Navigator.of(context).push<void>(
                     MaterialPageRoute(
                       builder: (_) => const PaymentMethodsScreen(),

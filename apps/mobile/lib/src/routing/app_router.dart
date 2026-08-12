@@ -9,6 +9,7 @@ import 'package:sidecar/src/features/auth/presentation/auth_screens.dart';
 import 'package:sidecar/src/features/diagnostics/presentation/config_diagnostics_screen.dart';
 import 'package:sidecar/src/features/navigation/presentation/main_tab_shell.dart';
 import 'package:sidecar/src/features/profile/presentation/profile_screens.dart';
+import 'package:sidecar/src/features/profile/presentation/public_profile_screen.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_details_screen.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_home_screen.dart';
@@ -51,6 +52,7 @@ abstract final class AppRoutes {
   static const myRides = '/rides/mine';
   static const messages = '/messages';
   static const account = '/account';
+  static const publicProfile = '/profiles/:userId';
   static const stripeRedirect = '/stripe-redirect';
 
   static String get initialLocation {
@@ -192,6 +194,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.stripeRedirect,
         redirect: (_, _) => AppRoutes.account,
+      ),
+      GoRoute(
+        path: AppRoutes.publicProfile,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, state) =>
+            PublicProfileScreen(userId: state.pathParameters['userId'] ?? ''),
       ),
       StatefulShellRoute.indexedStack(
         builder: (_, _, navigationShell) =>

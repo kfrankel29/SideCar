@@ -91,6 +91,14 @@ class FirebaseRideRepository implements RideRepository {
   }
 
   @override
+  void invalidateRide(String rideId) {
+    _detailsCaches[rideId]?.clear();
+    _myRidesCache.clear();
+    _leavingSoonCache.clear();
+    _searchCaches.clear();
+  }
+
+  @override
   Future<List<Ride>> listLeavingSoon({bool forceRefresh = false}) async {
     return _leavingSoonCache.get(_rideCacheDuration, () async {
       final data = await _call('listLeavingSoon', const {});
@@ -178,6 +186,9 @@ class UnavailableRideRepository implements RideRepository {
   @override
   Future<List<Ride>> searchRides(RideSearchCriteria criteria) async =>
       _notReady();
+
+  @override
+  void invalidateRide(String rideId) {}
 }
 
 List<dynamic> _list(Object? value) => value is List ? value : const [];

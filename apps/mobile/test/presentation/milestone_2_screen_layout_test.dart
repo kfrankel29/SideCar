@@ -447,7 +447,13 @@ class _SafetyRepository implements SafetyRepository {
   const _SafetyRepository();
 
   @override
+  Future<bool> isBlocked(String targetUserId) async => false;
+
+  @override
   Future<void> blockUser(String targetUserId) async {}
+
+  @override
+  Future<void> unblockUser(String targetUserId) async {}
 
   @override
   Future<void> reportUser({

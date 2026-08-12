@@ -34,8 +34,8 @@ void showAppNotice(
                 style: const TextStyle(
                   color: Colors.white,
                   fontFamily: 'SideCar Sans',
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),

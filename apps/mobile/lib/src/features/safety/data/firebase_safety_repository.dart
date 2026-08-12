@@ -11,8 +11,19 @@ class FirebaseSafetyRepository implements SafetyRepository {
   static const _timeout = Duration(seconds: 20);
 
   @override
+  Future<bool> isBlocked(String targetUserId) async {
+    final data = await _call('getBlockStatus', {'targetUserId': targetUserId});
+    return data['blocked'] == true;
+  }
+
+  @override
   Future<void> blockUser(String targetUserId) async {
     await _call('blockUser', {'targetUserId': targetUserId});
+  }
+
+  @override
+  Future<void> unblockUser(String targetUserId) async {
+    await _call('unblockUser', {'targetUserId': targetUserId});
   }
 
   @override
@@ -28,9 +39,16 @@ class FirebaseSafetyRepository implements SafetyRepository {
     });
   }
 
-  Future<void> _call(String name, Map<String, Object?> data) async {
+  Future<Map<String, dynamic>> _call(
+    String name,
+    Map<String, Object?> data,
+  ) async {
     try {
-      await _functions.httpsCallable(name).call<void>(data).timeout(_timeout);
+      final result = await _functions
+          .httpsCallable(name)
+          .call<Map<String, dynamic>>(data)
+          .timeout(_timeout);
+      return result.data;
     } on FirebaseFunctionsException catch (error) {
       throw AppFailure(
         error.message ?? 'We could not complete this safety action.',
@@ -53,7 +71,13 @@ class UnavailableSafetyRepository implements SafetyRepository {
   );
 
   @override
+  Future<bool> isBlocked(String targetUserId) async => _notReady();
+
+  @override
   Future<void> blockUser(String targetUserId) async => _notReady();
+
+  @override
+  Future<void> unblockUser(String targetUserId) async => _notReady();
 
   @override
   Future<void> reportUser({

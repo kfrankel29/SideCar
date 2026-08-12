@@ -32,6 +32,67 @@ enum BookingPaymentMethod {
   final String wireValue;
 }
 
+enum BookingSeat {
+  front('front', 'Front'),
+  rearLeft('rear_left', 'Rear left'),
+  rearRight('rear_right', 'Rear right');
+
+  const BookingSeat(this.wireValue, this.label);
+
+  final String wireValue;
+  final String label;
+
+  static BookingSeat fromWire(Object? value) => values.firstWhere(
+    (seat) => seat.wireValue == value,
+    orElse: () => BookingSeat.front,
+  );
+}
+
+class BookingStop {
+  const BookingStop({
+    required this.placeId,
+    required this.displayName,
+    required this.formattedAddress,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  factory BookingStop.fromJson(Map<String, dynamic> json) => BookingStop(
+    placeId: json['placeId'] as String? ?? '',
+    displayName: json['displayName'] as String? ?? '',
+    formattedAddress: json['formattedAddress'] as String? ?? '',
+    latitude: (json['latitude'] as num?)?.toDouble() ?? 0,
+    longitude: (json['longitude'] as num?)?.toDouble() ?? 0,
+  );
+
+  final String placeId;
+  final String displayName;
+  final String formattedAddress;
+  final double latitude;
+  final double longitude;
+}
+
+class SeatRequest {
+  const SeatRequest({
+    required this.rideId,
+    required this.seat,
+    required this.pickupPlaceId,
+    required this.dropoffPlaceId,
+  });
+
+  final String rideId;
+  final BookingSeat seat;
+  final String pickupPlaceId;
+  final String dropoffPlaceId;
+
+  Map<String, Object?> toJson() => {
+    'rideId': rideId,
+    'seatKey': seat.wireValue,
+    'pickupPlaceId': pickupPlaceId,
+    'dropoffPlaceId': dropoffPlaceId,
+  };
+}
+
 class BookingPaymentQuote {
   const BookingPaymentQuote({
     required this.baseFareCents,
@@ -91,6 +152,7 @@ class SeatBooking {
     required this.riderPhotoUrl,
     required this.driverId,
     required this.driverName,
+    required this.driverPhotoUrl,
     required this.status,
     required this.originName,
     required this.destinationName,
@@ -99,6 +161,9 @@ class SeatBooking {
     required this.serviceFeeCents,
     required this.processingFeeCents,
     required this.totalCents,
+    this.seat = BookingSeat.front,
+    this.pickupLocation,
+    this.dropoffLocation,
     this.paymentStatus = '',
     this.payoutStatus = '',
     this.driverPayoutCents = 0,
@@ -116,6 +181,7 @@ class SeatBooking {
     riderPhotoUrl: json['riderPhotoUrl'] as String? ?? '',
     driverId: json['driverId'] as String? ?? '',
     driverName: json['driverName'] as String? ?? '',
+    driverPhotoUrl: json['driverPhotoUrl'] as String? ?? '',
     status: BookingStatus.fromWire(json['status']),
     originName: json['originName'] as String? ?? '',
     destinationName: json['destinationName'] as String? ?? '',
@@ -129,6 +195,9 @@ class SeatBooking {
     serviceFeeCents: (json['serviceFeeCents'] as num?)?.round() ?? 0,
     processingFeeCents: (json['processingFeeCents'] as num?)?.round() ?? 0,
     totalCents: (json['totalCents'] as num?)?.round() ?? 0,
+    seat: BookingSeat.fromWire(json['seatKey']),
+    pickupLocation: _stop(json['pickupLocation']),
+    dropoffLocation: _stop(json['dropoffLocation']),
     paymentStatus: json['paymentStatus'] as String? ?? '',
     payoutStatus: json['payoutStatus'] as String? ?? '',
     driverPayoutCents: (json['driverPayoutCents'] as num?)?.round() ?? 0,
@@ -144,6 +213,7 @@ class SeatBooking {
   final String riderPhotoUrl;
   final String driverId;
   final String driverName;
+  final String driverPhotoUrl;
   final BookingStatus status;
   final String originName;
   final String destinationName;
@@ -153,6 +223,9 @@ class SeatBooking {
   final int serviceFeeCents;
   final int processingFeeCents;
   final int totalCents;
+  final BookingSeat seat;
+  final BookingStop? pickupLocation;
+  final BookingStop? dropoffLocation;
   final String paymentStatus;
   final String payoutStatus;
   final int driverPayoutCents;
@@ -163,6 +236,16 @@ class SeatBooking {
 
   bool get hasFinancialActivity =>
       totalCents > 0 || paymentStatus.isNotEmpty || payoutStatus.isNotEmpty;
+}
+
+BookingStop? _stop(Object? value) {
+  if (value is Map<String, dynamic>) return BookingStop.fromJson(value);
+  if (value is Map) {
+    return BookingStop.fromJson(
+      value.map((key, item) => MapEntry('$key', item)),
+    );
+  }
+  return null;
 }
 
 class DriverPayoutStatus {

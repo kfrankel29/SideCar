@@ -15,7 +15,9 @@ import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/data/firebase_booking_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/profile/data/firebase_profile_repository.dart';
+import 'package:sidecar/src/features/profile/data/firebase_public_profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
+import 'package:sidecar/src/features/profile/domain/public_profile_repository.dart';
 import 'package:sidecar/src/features/rides/data/firebase_ride_repository.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/safety/data/firebase_safety_repository.dart';
@@ -29,6 +31,7 @@ class AppBootstrapResult {
     required this.businessConfigRepository,
     required this.authRepository,
     required this.profileRepository,
+    required this.publicProfileRepository,
     required this.rideRepository,
     required this.bookingRepository,
     required this.verificationRepository,
@@ -40,6 +43,7 @@ class AppBootstrapResult {
   final BusinessConfigRepository businessConfigRepository;
   final AuthRepository authRepository;
   final ProfileRepository profileRepository;
+  final PublicProfileRepository publicProfileRepository;
   final RideRepository rideRepository;
   final BookingRepository bookingRepository;
   final VerificationRepository verificationRepository;
@@ -93,6 +97,7 @@ class AppBootstrap {
           FirebaseFirestore.instance,
           FirebaseStorage.instance,
         ),
+        publicProfileRepository: FirebasePublicProfileRepository(functions),
         verificationRepository: FirebaseVerificationRepository(
           auth,
           FirebaseFirestore.instance,
@@ -113,6 +118,7 @@ class AppBootstrap {
         ),
         authRepository: const UnavailableAuthRepository(),
         profileRepository: const UnavailableProfileRepository(),
+        publicProfileRepository: const UnavailablePublicProfileRepository(),
         rideRepository: const UnavailableRideRepository(),
         bookingRepository: const UnavailableBookingRepository(),
         verificationRepository: const UnavailableVerificationRepository(),

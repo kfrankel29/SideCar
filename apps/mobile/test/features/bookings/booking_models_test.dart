@@ -23,13 +23,50 @@ void main() {
       'totalCents': 5592,
       'paymentStatus': 'paid',
       'pickupCode': '0909',
+      'seatKey': 'rear_left',
+      'pickupLocation': {
+        'placeId': 'pickup-1',
+        'displayName': 'Pardall Road',
+        'formattedAddress': '6551 Trigo Rd, Isla Vista, CA 93117',
+        'latitude': 34.4102,
+        'longitude': -119.8554,
+      },
+      'dropoffLocation': {
+        'placeId': 'dropoff-1',
+        'displayName': 'Palo Alto Caltrain',
+        'formattedAddress': '95 University Ave, Palo Alto, CA 94301',
+        'latitude': 37.443,
+        'longitude': -122.1652,
+      },
     });
 
     expect(booking.status, BookingStatus.confirmed);
     expect(booking.totalLabel, r'$55.92');
     expect(booking.pickupCode, '0909');
     expect(booking.riderPhotoUrl, 'https://example.com/maya.jpg');
+    expect(booking.seat, BookingSeat.rearLeft);
+    expect(
+      booking.pickupLocation?.formattedAddress,
+      '6551 Trigo Rd, Isla Vista, CA 93117',
+    );
+    expect(booking.dropoffLocation?.placeId, 'dropoff-1');
     expect(booking.hasFinancialActivity, isTrue);
+  });
+
+  test('seat request sends the selected seat and exact address place IDs', () {
+    const request = SeatRequest(
+      rideId: 'ride-1',
+      seat: BookingSeat.rearRight,
+      pickupPlaceId: 'pickup-1',
+      dropoffPlaceId: 'dropoff-1',
+    );
+
+    expect(request.toJson(), {
+      'rideId': 'ride-1',
+      'seatKey': 'rear_right',
+      'pickupPlaceId': 'pickup-1',
+      'dropoffPlaceId': 'dropoff-1',
+    });
   });
 
   test('pending seat requests are not payment-history entries', () {

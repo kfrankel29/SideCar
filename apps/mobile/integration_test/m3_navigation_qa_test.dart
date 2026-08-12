@@ -343,6 +343,9 @@ class _QaVerificationRepository implements VerificationRepository {
 }
 
 class _QaRideRepository implements RideRepository {
+  @override
+  void invalidateRide(String rideId) {}
+
   const _QaRideRepository();
 
   @override

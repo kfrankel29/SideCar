@@ -18,11 +18,12 @@ class BookingCheckoutScreen extends ConsumerStatefulWidget {
 }
 
 class _BookingCheckoutScreenState extends ConsumerState<BookingCheckoutScreen> {
-  BookingPaymentMethod _method = BookingPaymentMethod.card;
+  static const _method = BookingPaymentMethod.card;
   BookingPaymentQuote? _quote;
   bool _loading = true;
   bool _paying = false;
   String? _error;
+  int _quoteRequest = 0;
 
   @override
   void initState() {
@@ -31,6 +32,8 @@ class _BookingCheckoutScreenState extends ConsumerState<BookingCheckoutScreen> {
   }
 
   Future<void> _loadQuote() async {
+    final request = ++_quoteRequest;
+    final method = _method;
     setState(() {
       _loading = true;
       _error = null;
@@ -38,22 +41,20 @@ class _BookingCheckoutScreenState extends ConsumerState<BookingCheckoutScreen> {
     try {
       final quote = await ref
           .read(bookingRepositoryProvider)
-          .quoteBookingPayment(widget.booking.id, _method);
-      if (mounted) setState(() => _quote = quote);
+          .quoteBookingPayment(widget.booking.id, method);
+      if (mounted && request == _quoteRequest) {
+        setState(() => _quote = quote);
+      }
     } on AppFailure catch (error) {
-      if (mounted) {
+      if (mounted && request == _quoteRequest) {
         setState(() => _error = error.message);
         showAppNotice(context, error.message, kind: AppNoticeKind.error);
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && request == _quoteRequest) {
+        setState(() => _loading = false);
+      }
     }
-  }
-
-  Future<void> _selectMethod(BookingPaymentMethod method) async {
-    if (_method == method || _paying) return;
-    setState(() => _method = method);
-    await _loadQuote();
   }
 
   Future<void> _pay() async {
@@ -69,7 +70,10 @@ class _BookingCheckoutScreenState extends ConsumerState<BookingCheckoutScreen> {
       if (!mounted) return;
       Navigator.pop(context, booking);
     } on AppFailure catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (mounted) {
+        setState(() => _error = error.message);
+        showAppNotice(context, error.message, kind: AppNoticeKind.error);
+      }
     } finally {
       if (mounted) setState(() => _paying = false);
     }
@@ -94,28 +98,14 @@ class _BookingCheckoutScreenState extends ConsumerState<BookingCheckoutScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${formatShortDate(widget.booking.departureAt)} · ${formatTime(widget.booking.departureAt)} · Front seat',
+                    '${formatShortDate(widget.booking.departureAt)} · ${formatTime(widget.booking.departureAt)} · ${widget.booking.seat.label} seat',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  const SizedBox(height: 28),
-                  Text(
-                    'Payment method',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 10),
-                  _PaymentChoiceTile(
-                    title: 'Card',
-                    subtitle: 'Pay securely with a credit or debit card',
-                    selected: _method == BookingPaymentMethod.card,
-                    onTap: () => _selectMethod(BookingPaymentMethod.card),
-                  ),
-                  const SizedBox(height: 10),
-                  _PaymentChoiceTile(
-                    title: 'ACH Payment',
-                    subtitle: 'Connect your bank account · 2% discount',
-                    selected: _method == BookingPaymentMethod.bank,
-                    onTap: () => _selectMethod(BookingPaymentMethod.bank),
-                  ),
+                  if (widget.booking.pickupLocation != null ||
+                      widget.booking.dropoffLocation != null) ...[
+                    const SizedBox(height: 14),
+                    _BookingAddressSummary(booking: widget.booking),
+                  ],
                   const SizedBox(height: 28),
                   if (_loading)
                     const Center(child: CircularProgressIndicator())
@@ -197,8 +187,10 @@ class _PaymentMethodsScreenState extends ConsumerState<PaymentMethodsScreen> {
     if (_adding) return;
     setState(() => _adding = true);
     try {
-      await ref.read(bookingRepositoryProvider).addPaymentMethod();
-      if (mounted) {
+      final added = await ref
+          .read(bookingRepositoryProvider)
+          .addPaymentMethod(BookingPaymentMethod.card);
+      if (mounted && added) {
         showAppNotice(context, 'Payment method added.');
         setState(() {
           _methods = ref.read(bookingRepositoryProvider).listPaymentMethods();
@@ -229,16 +221,6 @@ class _PaymentMethodsScreenState extends ConsumerState<PaymentMethodsScreen> {
             children: [
               for (var index = 0; index < methods.length; index++) ...[
                 _MethodCard(method: methods[index], selected: index == 0),
-                const SizedBox(height: 10),
-              ],
-              if (methods.every(
-                (method) => method.type != BookingPaymentMethod.bank,
-              )) ...[
-                const _PaymentChoiceTile(
-                  title: 'ACH Payment',
-                  subtitle: 'Connect your bank account · 2% discount',
-                  selected: false,
-                ),
                 const SizedBox(height: 10),
               ],
               OutlinedButton(
@@ -388,7 +370,11 @@ class PayoutHistoryScreen extends ConsumerWidget {
           final status = snapshot.data?[0] as DriverPayoutStatus?;
           final bookings = snapshot.data?[1] as List<SeatBooking>? ?? const [];
           final paid = bookings
-              .where((booking) => booking.driverPayoutCents > 0)
+              .where(
+                (booking) =>
+                    booking.payoutStatus == 'paid' &&
+                    booking.driverPayoutCents > 0,
+              )
               .toList();
           return ListView(
             padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
@@ -404,7 +390,11 @@ class PayoutHistoryScreen extends ConsumerWidget {
                   children: [
                     const Text(
                       'PAYOUT BALANCE',
-                      style: TextStyle(color: Colors.white70, fontSize: 11),
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -474,7 +464,11 @@ class PickupCodeScreen extends StatelessWidget {
               const Text(
                 'YOUR PICKUP CODE:',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.mutedInk, fontSize: 11),
+                style: TextStyle(
+                  color: AppColors.mutedInk,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 14),
               Row(
@@ -535,19 +529,16 @@ class _PaymentChoiceTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.selected,
-    this.onTap,
   });
 
   final String title;
   final String subtitle;
   final bool selected;
-  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: onTap,
+    return Semantics(
+      selected: selected,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
         decoration: BoxDecoration(
@@ -572,6 +563,41 @@ class _PaymentChoiceTile extends StatelessWidget {
             if (selected) const Icon(Icons.check_rounded, size: 20),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _BookingAddressSummary extends StatelessWidget {
+  const _BookingAddressSummary({required this.booking});
+
+  final SeatBooking booking;
+
+  @override
+  Widget build(BuildContext context) {
+    final pickup = booking.pickupLocation;
+    final dropoff = booking.dropoffLocation;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.softSurface,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (pickup != null)
+            Text(
+              'Pickup · ${pickup.formattedAddress}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (pickup != null && dropoff != null) const SizedBox(height: 5),
+          if (dropoff != null)
+            Text(
+              'Drop-off · ${dropoff.formattedAddress}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+        ],
       ),
     );
   }

@@ -283,7 +283,13 @@ class _QaVerificationRepository implements VerificationRepository {
 
 class _QaSafetyRepository implements SafetyRepository {
   @override
+  Future<bool> isBlocked(String targetUserId) async => false;
+
+  @override
   Future<void> blockUser(String targetUserId) async {}
+
+  @override
+  Future<void> unblockUser(String targetUserId) async {}
 
   @override
   Future<void> reportUser({

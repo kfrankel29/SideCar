@@ -22,7 +22,9 @@ enum SafetyReportReason {
 }
 
 abstract interface class SafetyRepository {
+  Future<bool> isBlocked(String targetUserId);
   Future<void> blockUser(String targetUserId);
+  Future<void> unblockUser(String targetUserId);
   Future<void> reportUser({
     required String targetUserId,
     required SafetyReportReason reason,
