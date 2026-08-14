@@ -50,3 +50,15 @@ export function rideIntervalsOverlap(
   const secondEnd = secondDepartureMillis + Math.max(1, secondDurationSeconds) * 1000;
   return firstDepartureMillis < secondEnd && secondDepartureMillis < firstEnd;
 }
+
+export function normalizeImmediateDeparture(
+  requestedMillis: number,
+  nowMillis: number,
+): number | null {
+  const fiveMinutes = 5 * 60 * 1000;
+  const latestAllowed = nowMillis + 366 * 24 * 60 * 60 * 1000;
+  if (requestedMillis < nowMillis - fiveMinutes || requestedMillis > latestAllowed) {
+    return null;
+  }
+  return Math.max(requestedMillis, nowMillis);
+}

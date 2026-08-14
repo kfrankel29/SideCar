@@ -86,7 +86,9 @@ void main() {
       ProviderScope(
         overrides: [
           authRepositoryProvider.overrideWithValue(const _M4AuthRepository()),
-          bookingRepositoryProvider.overrideWithValue(repository),
+          bookingRepositoryProvider.overrideWithValue(
+            _EmptyM4BookingRepository(),
+          ),
           rideRepositoryProvider.overrideWithValue(
             _M4RideRepository([_publishedRide()]),
           ),
@@ -116,6 +118,96 @@ void main() {
     if (holdForExternalCapture) {
       await Future<void>.delayed(Duration(seconds: holdSeconds));
     }
+  });
+
+  testWidgets('paid rider entry points show trip information', (tester) async {
+    if (focusedScreen.isNotEmpty &&
+        focusedScreen != 'm4-paid-rider-trip-details') {
+      return;
+    }
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(const _M4AuthRepository()),
+          bookingRepositoryProvider.overrideWithValue(repository),
+          rideRepositoryProvider.overrideWithValue(
+            _M4RideRepository([_publishedRide()]),
+          ),
+        ],
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          home: const RideDetailsScreen(rideId: 'ride-m4'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your trip'), findsOneWidget);
+    expect(find.text('View pickup code'), findsOneWidget);
+    expect(find.text('Request seat'), findsNothing);
+    expect(find.text('Confirm your stops'), findsNothing);
+    expect(tester.takeException(), isNull);
+    final bytes = await binding.takeScreenshot('m4-paid-rider-trip-details');
+    final file = File(
+      '${Directory.systemTemp.path}/m4-paid-rider-trip-details.png',
+    );
+    await file.writeAsBytes(bytes, flush: true);
+    debugPrint('QA_SCREENSHOT=${file.path}');
+    if (holdForExternalCapture) {
+      await Future<void>.delayed(Duration(seconds: holdSeconds));
+    }
+  });
+
+  testWidgets('driver live trip shows rider-specific stops and pickup choice', (
+    tester,
+  ) async {
+    if (focusedScreen.isNotEmpty && focusedScreen != 'm4-driver-live-trip') {
+      return;
+    }
+    final liveRepository = _M4LiveTripRepository();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(
+            const _M4DriverAuthRepository(),
+          ),
+          bookingRepositoryProvider.overrideWithValue(liveRepository),
+          rideRepositoryProvider.overrideWithValue(
+            _M4RideRepository([_liveRide()]),
+          ),
+        ],
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          home: const RideDetailsScreen(rideId: 'ride-m4'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Trip in progress'), findsWidgets);
+    expect(find.text('Pickup stops'), findsOneWidget);
+    expect(find.text('Drop-off stops'), findsOneWidget);
+    expect(find.text('Add rider pickup code'), findsOneWidget);
+    expect(find.text('Maya Chen'), findsWidgets);
+    expect(find.text('Lena Park'), findsWidgets);
+    expect(tester.takeException(), isNull);
+
+    final bytes = await binding.takeScreenshot('m4-driver-live-trip');
+    final file = File('${Directory.systemTemp.path}/m4-driver-live-trip.png');
+    await file.writeAsBytes(bytes, flush: true);
+    debugPrint('QA_SCREENSHOT=${file.path}');
+    if (holdForExternalCapture) {
+      await Future<void>.delayed(Duration(seconds: holdSeconds));
+    }
+
+    await tester.tap(find.text('Add rider pickup code'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter pickup code'), findsOneWidget);
+    expect(find.text('Rider'), findsOneWidget);
+    expect(find.text('Verify and start trip'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('exercises the Milestone 4 payment controls and navigation', (
@@ -281,13 +373,15 @@ class _M4SafetyRepository implements SafetyRepository {
 }
 
 SeatBooking _booking({
+  String id = 'booking-m4',
+  String riderName = 'Maya Chen',
   String status = 'confirmed',
   String payoutStatus = 'paid',
 }) => SeatBooking.fromJson({
-  'id': 'booking-m4',
+  'id': id,
   'rideId': 'ride-m4',
   'riderId': 'rider-m4',
-  'riderName': 'Maya Chen',
+  'riderName': riderName,
   'riderInitials': 'MC',
   'riderPhotoUrl': '',
   'driverId': 'driver-m4',
@@ -319,6 +413,34 @@ SeatBooking _booking({
     'latitude': 37.4434,
     'longitude': -122.1646,
   },
+});
+
+Ride _liveRide() => Ride.fromJson({
+  'id': 'ride-m4',
+  'driverId': 'driver-m4',
+  'driverName': 'Jordan Taylor',
+  'driverInitials': 'JT',
+  'vehicle': {'makeAndModel': 'Honda Civic'},
+  'origin': {
+    'placeId': 'pickup-m4',
+    'displayName': 'Pardall Rd',
+    'latitude': 34.4138,
+    'longitude': -119.8556,
+  },
+  'destination': {
+    'placeId': 'dropoff-m4',
+    'displayName': 'Palo Alto',
+    'latitude': 37.4434,
+    'longitude': -122.1646,
+  },
+  'departureAt': '2026-08-12T22:00:00.000Z',
+  'seatsTotal': 3,
+  'seatsAvailable': 1,
+  'bookedSeats': 2,
+  'pricePerSeatCents': 5000,
+  'luggageAllowance': 'one_suitcase',
+  'genderRestriction': 'any',
+  'status': 'published',
 });
 
 Ride _cancelledRide() => Ride.fromJson({
@@ -374,6 +496,22 @@ class _M4AuthRepository extends UnavailableAuthRepository {
   static const _user = AccountUser(
     id: 'rider-m4',
     email: 'rider@ucsb.edu',
+    emailVerified: true,
+  );
+
+  @override
+  AccountUser get currentUser => _user;
+
+  @override
+  Stream<AccountUser?> authStateChanges() => Stream.value(_user);
+}
+
+class _M4DriverAuthRepository extends UnavailableAuthRepository {
+  const _M4DriverAuthRepository();
+
+  static const _user = AccountUser(
+    id: 'driver-m4',
+    email: 'driver@ucsb.edu',
     emailVerified: true,
   );
 
@@ -442,6 +580,23 @@ class _M4VisualRepository extends UnavailableBookingRepository {
         last4: '6789',
         availableCents: 45000,
       );
+}
+
+class _EmptyM4BookingRepository extends _M4VisualRepository {
+  @override
+  Future<List<SeatBooking>> listMyBookings({bool forceRefresh = false}) async =>
+      const [];
+}
+
+class _M4LiveTripRepository extends _M4VisualRepository {
+  @override
+  Future<List<SeatBooking>> listRideRequests({
+    String? rideId,
+    bool forceRefresh = false,
+  }) async => [
+    _booking(status: 'in_progress'),
+    _booking(id: 'booking-m4-lena', riderName: 'Lena Park'),
+  ];
 }
 
 class _M4InteractionRepository extends _M4VisualRepository {
@@ -542,6 +697,11 @@ class _M4RideRepository implements RideRepository {
     if (match.isNotEmpty) return match.first;
     return _publishedRide();
   }
+
+  @override
+  Future<LiveTripPlan> getLiveTrip(String rideId) async => _unused();
+  @override
+  Future<LiveTripPlan> startLiveTrip(String rideId) async => _unused();
 
   @override
   Future<List<Ride>> listLeavingSoon({bool forceRefresh = false}) async =>

@@ -7,7 +7,10 @@ import 'package:sidecar/src/features/bookings/presentation/payment_screens.dart'
 import 'package:sidecar/src/features/profile/domain/public_profile.dart';
 import 'package:sidecar/src/features/profile/domain/public_profile_repository.dart';
 import 'package:sidecar/src/features/profile/presentation/public_profile_screen.dart';
+import 'package:sidecar/src/features/rides/domain/ride_models.dart';
+import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/driver_ride_screens.dart';
+import 'package:sidecar/src/features/rides/presentation/live_trip_screen.dart';
 import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
@@ -187,6 +190,86 @@ void main() {
     expect(find.text('Block user'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('driver sees pickups before code entry and selects the rider', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          rideRepositoryProvider.overrideWithValue(_M4RideRepository()),
+          bookingRepositoryProvider.overrideWithValue(
+            _M4Repository(bookings: [_booking()]),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: LiveTripScreen(
+            ride: _liveRide(),
+            isDriver: true,
+            initialPlan: _livePlan(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pickup order'), findsOneWidget);
+    expect(find.text('Honda Civic'), findsOneWidget);
+    expect(find.text('Maya Chen'), findsOneWidget);
+    expect(find.text('ETA 3:15 PM'), findsOneWidget);
+    expect(find.text('Drop-off order'), findsOneWidget);
+    expect(
+      find.text(
+        'The remaining route will be optimized after every rider is picked up.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Enter rider pickup code'), findsOneWidget);
+
+    await tester.tap(find.text('Enter rider pickup code'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confirm rider pickup'), findsOneWidget);
+    expect(find.text('Rider'), findsOneWidget);
+    expect(find.text('Pickup code'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'rider sees the complete live route and every rider association',
+    (tester) async {
+      await setPhoneSize(tester);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            rideRepositoryProvider.overrideWithValue(_M4RideRepository()),
+            bookingRepositoryProvider.overrideWithValue(_M4Repository()),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.light,
+            home: LiveTripScreen(
+              ride: _liveRide(),
+              isDriver: false,
+              initialPlan: _livePlan(),
+              riderBooking: _booking(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pickup order'), findsOneWidget);
+      expect(find.text('Honda Civic'), findsOneWidget);
+      expect(find.text('Drop-off order'), findsOneWidget);
+      expect(find.text('Maya Chen'), findsNWidgets(2));
+      expect(find.text('ETA 3:15 PM'), findsOneWidget);
+      expect(find.text('ETA 8:15 PM'), findsOneWidget);
+      expect(find.text('View my pickup code'), findsOneWidget);
+      expect(find.text('Open directions'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 class _M4SafetyRepository implements SafetyRepository {
@@ -247,9 +330,19 @@ SeatBooking _booking() => SeatBooking.fromJson({
 });
 
 class _M4Repository extends UnavailableBookingRepository {
+  _M4Repository({this.bookings = const []});
+
+  final List<SeatBooking> bookings;
+
   @override
   Future<List<SeatBooking>> listMyBookings({bool forceRefresh = false}) async =>
-      const [];
+      bookings;
+
+  @override
+  Future<List<SeatBooking>> listRideRequests({
+    String? rideId,
+    bool forceRefresh = false,
+  }) async => bookings;
 
   @override
   Future<BookingPaymentQuote> quoteBookingPayment(
@@ -272,6 +365,117 @@ class _M4Repository extends UnavailableBookingRepository {
     ),
   ];
 }
+
+class _M4RideRepository implements RideRepository {
+  @override
+  Future<LiveTripPlan> getLiveTrip(String rideId) async => _livePlan();
+
+  @override
+  Future<LiveTripPlan> startLiveTrip(String rideId) async => _livePlan();
+
+  Never _unused() => throw UnsupportedError('Unused by this test.');
+
+  @override
+  Future<void> cancelRide(String rideId) async => _unused();
+  @override
+  Future<Ride> createRide(RideDraft draft) async => _unused();
+  @override
+  Future<Ride> getRide(String rideId) async => _liveRide();
+  @override
+  void invalidateRide(String rideId) {}
+  @override
+  Future<List<Ride>> listLeavingSoon({bool forceRefresh = false}) async =>
+      _unused();
+  @override
+  Future<List<Ride>> listMyRides({bool forceRefresh = false}) async =>
+      _unused();
+  @override
+  Future<List<RidePlacePrediction>> searchPlaces(String query) async =>
+      _unused();
+  @override
+  Future<List<Ride>> searchRides(RideSearchCriteria criteria) async =>
+      _unused();
+  @override
+  Future<Ride> updateRide(RideUpdate update) async => _unused();
+}
+
+Ride _liveRide() => Ride.fromJson({
+  'id': 'ride-1',
+  'driverId': 'driver-1',
+  'driverName': 'Jordan Taylor',
+  'driverInitials': 'JT',
+  'driverGender': 'Male',
+  'vehicle': {
+    'makeAndModel': 'Honda Civic',
+    'year': 2024,
+    'color': 'Black',
+    'photoUrl': '',
+  },
+  'origin': {
+    'placeId': 'origin',
+    'displayName': 'Isla Vista',
+    'formattedAddress': 'Isla Vista, CA',
+    'latitude': 34.41,
+    'longitude': -119.85,
+  },
+  'destination': {
+    'placeId': 'destination',
+    'displayName': 'Palo Alto',
+    'formattedAddress': 'Palo Alto, CA',
+    'latitude': 37.44,
+    'longitude': -122.16,
+  },
+  'departureAt': '2026-08-10T22:00:00.000Z',
+  'status': 'in_progress',
+  'seats': 1,
+  'availableSeats': 0,
+  'bookedSeats': 1,
+  'pricePerSeatCents': 5000,
+});
+
+LiveTripPlan _livePlan() => LiveTripPlan(
+  phase: LiveTripPhase.pickups,
+  startedAt: DateTime(2026, 8, 10, 15),
+  updatedAt: DateTime(2026, 8, 10, 15),
+  pickupStops: [
+    LiveTripStop(
+      bookingId: 'booking-1',
+      riderId: 'rider-1',
+      riderName: 'Maya Chen',
+      kind: LiveTripStopKind.pickup,
+      order: 0,
+      location: const RideLocation(
+        placeId: 'pickup-1',
+        displayName: 'Pardall Road',
+        formattedAddress: '6551 Trigo Rd, Isla Vista, CA 93117',
+        latitude: 34.4102,
+        longitude: -119.8554,
+      ),
+      eta: DateTime(2026, 8, 10, 15, 15),
+      completedAt: null,
+    ),
+  ],
+  dropoffStops: [
+    LiveTripStop(
+      bookingId: 'booking-1',
+      riderId: 'rider-1',
+      riderName: 'Maya Chen',
+      kind: LiveTripStopKind.dropoff,
+      order: 0,
+      location: const RideLocation(
+        placeId: 'dropoff-1',
+        displayName: 'Palo Alto Caltrain',
+        formattedAddress: '95 University Ave, Palo Alto, CA 94301',
+        latitude: 37.443,
+        longitude: -122.1652,
+      ),
+      eta: DateTime(2026, 8, 10, 20, 15),
+      completedAt: null,
+    ),
+  ],
+  pickupPolyline: 'pickup',
+  dropoffPolyline: 'dropoff',
+);
 
 class _M4PublicProfileRepository implements PublicProfileRepository {
   @override

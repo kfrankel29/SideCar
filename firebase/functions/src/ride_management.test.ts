@@ -4,6 +4,7 @@ import {
   availableSeatsAfterUpdate,
   bookedSeatCount,
   isPriceWithinLimit,
+  normalizeImmediateDeparture,
   publicSeatInventory,
   rideIntervalsOverlap,
 } from "./ride_management.js";
@@ -49,4 +50,19 @@ test("detects overlapping driver ride intervals", () => {
   assert.equal(rideIntervalsOverlap(0, 7200, hour, 1800), true);
   assert.equal(rideIntervalsOverlap(0, 3600, hour, 1800), false);
   assert.equal(rideIntervalsOverlap(hour, 1800, 0, 3600), false);
+});
+
+test("allows immediate ride posts without an advance-time restriction", () => {
+  const now = Date.UTC(2026, 7, 14, 12, 0, 30);
+  assert.equal(normalizeImmediateDeparture(now + 1_000, now), now + 1_000);
+  assert.equal(normalizeImmediateDeparture(now - 30_000, now), now);
+});
+
+test("rejects expired and unreasonably distant ride times", () => {
+  const now = Date.UTC(2026, 7, 14, 12, 0, 0);
+  assert.equal(normalizeImmediateDeparture(now - 6 * 60_000, now), null);
+  assert.equal(
+    normalizeImmediateDeparture(now + 367 * 24 * 60 * 60_000, now),
+    null,
+  );
 });

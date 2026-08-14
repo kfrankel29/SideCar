@@ -13,6 +13,7 @@ import {
   RefundTier,
   canRequestGenderRestrictedRide,
   calculateCheckoutAmounts,
+  recordFailedPickupCodeAttempt,
   refundForRiderCancellation,
   validateRefundTiers,
 } from "./booking_policy.js";
@@ -21,6 +22,7 @@ import {
   decodeGooglePolyline,
   routePointAllowed,
 } from "./ride_routing.js";
+import {liveTripMapsSecret, refreshLiveTripAfterPickup} from "./live_trips.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -1406,7 +1408,13 @@ export const cancelDriverRide = onCall(
 );
 
 export const verifyPickupCode = onCall(
-  {region, enforceAppCheck: true, secrets: [bookingCodeSecret], maxInstances: 30},
+  {
+    region,
+    enforceAppCheck: true,
+    secrets: [bookingCodeSecret, liveTripMapsSecret],
+    maxInstances: 30,
+    timeoutSeconds: 45,
+  },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
     await requireVerifiedUser(request.auth.uid, true);
@@ -1422,26 +1430,87 @@ export const verifyPickupCode = onCall(
     if (!booking || booking.driverId !== request.auth.uid) {
       throw new HttpsError("permission-denied", "You cannot start this booking.");
     }
-    if (booking.status !== "confirmed") {
-      throw new HttpsError("failed-precondition", "This booking is not ready to start.");
-    }
-    if (!pickupCodeMatches(id, code)) {
-      throw new HttpsError("invalid-argument", "That pickup code does not match.");
-    }
     const ride = (await db.collection("rides").doc(String(booking.rideId)).get()).data();
-    const durationSeconds = Math.max(60, Number(ride?.durationSeconds ?? 0));
+    if (!ride || ride.status !== "in_progress" || !ride.liveTrip) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Start the trip before entering a rider's pickup code.",
+      );
+    }
+    const durationSeconds = Math.max(60, Number(ride.durationSeconds ?? 0));
     const estimatedEnd = Timestamp.fromMillis(
       Date.now() + durationSeconds * 1_000,
     );
-    await reference.update({
-      status: "in_progress" satisfies BookingStatus,
-      pickupCodeVerifiedAt: FieldValue.serverTimestamp(),
-      startedAt: FieldValue.serverTimestamp(),
-      estimatedCompletionAt: estimatedEnd,
-      updatedAt: FieldValue.serverTimestamp(),
+    const result = await db.runTransaction(async (transaction) => {
+      const currentSnapshot = await transaction.get(reference);
+      const current = currentSnapshot.data();
+      if (!current || current.driverId !== request.auth?.uid) {
+        throw new HttpsError("permission-denied", "You cannot start this booking.");
+      }
+      const matches = pickupCodeMatches(id, code);
+      if (current.status === "in_progress" && matches) {
+        return {started: false, attemptsRemaining: 5};
+      }
+      if (current.status !== "confirmed") {
+        throw new HttpsError("failed-precondition", "This booking is not ready to start.");
+      }
+      const failedAttempts = Math.max(0, Number(current.pickupCodeFailedAttempts ?? 0));
+      if (failedAttempts >= 5) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "Pickup code locked after 5 attempts. Contact support to continue.",
+        );
+      }
+      if (!matches) {
+        const attempt = recordFailedPickupCodeAttempt(failedAttempts);
+        transaction.update(reference, {
+          pickupCodeFailedAttempts: attempt.failedAttempts,
+          ...(attempt.locked ? {
+            pickupCodeLockedAt: FieldValue.serverTimestamp(),
+          } : {}),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return {started: false, attemptsRemaining: attempt.attemptsRemaining};
+      }
+      transaction.update(reference, {
+        status: "in_progress" satisfies BookingStatus,
+        pickupCodeFailedAttempts: FieldValue.delete(),
+        pickupCodeLockedAt: FieldValue.delete(),
+        pickupCodeVerifiedAt: FieldValue.serverTimestamp(),
+        startedAt: FieldValue.serverTimestamp(),
+        estimatedCompletionAt: estimatedEnd,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return {started: true, attemptsRemaining: 5};
     });
-    await notify(String(booking.riderId), "trip_started", {bookingId: id});
-    return {status: "in_progress", estimatedCompletionAt: estimatedEnd.toDate().toISOString()};
+    if (!result.started) {
+      if (result.attemptsRemaining < 5) {
+        const suffix = result.attemptsRemaining === 1 ? "attempt" : "attempts";
+        throw new HttpsError(
+          "invalid-argument",
+          result.attemptsRemaining === 0 ?
+            "That pickup code does not match. Pickup code locked after 5 attempts." :
+            `That pickup code does not match. ${result.attemptsRemaining} ${suffix} remaining.`,
+        );
+      }
+      return {status: "in_progress", estimatedCompletionAt: estimatedEnd.toDate().toISOString()};
+    }
+    let completionAt = estimatedEnd;
+    try {
+      completionAt = await refreshLiveTripAfterPickup(String(booking.rideId), id) ?? estimatedEnd;
+      await reference.update({
+        estimatedCompletionAt: completionAt,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      logger.warn("Live trip route refresh failed after a valid pickup.", {
+        rideId: booking.rideId,
+        bookingId: id,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+    await notify(String(booking.riderId), "pickup_confirmed", {bookingId: id});
+    return {status: "in_progress", estimatedCompletionAt: completionAt.toDate().toISOString()};
   },
 );
 

@@ -231,6 +231,13 @@ class _EmptyRideRepository implements RideRepository {
   Future<Ride> getRide(String rideId) => throw UnimplementedError();
 
   @override
+  Future<LiveTripPlan> getLiveTrip(String rideId) => throw UnimplementedError();
+
+  @override
+  Future<LiveTripPlan> startLiveTrip(String rideId) =>
+      throw UnimplementedError();
+
+  @override
   Future<List<Ride>> listLeavingSoon({bool forceRefresh = false}) async =>
       const [];
 

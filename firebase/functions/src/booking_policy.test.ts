@@ -3,9 +3,33 @@ import test from "node:test";
 import {
   canRequestGenderRestrictedRide,
   calculateCheckoutAmounts,
+  recordFailedPickupCodeAttempt,
   refundForRiderCancellation,
   validateRefundTiers,
 } from "./booking_policy.js";
+
+test("pickup codes lock after exactly five failed attempts", () => {
+  assert.deepEqual(recordFailedPickupCodeAttempt(undefined), {
+    failedAttempts: 1,
+    attemptsRemaining: 4,
+    locked: false,
+  });
+  assert.deepEqual(recordFailedPickupCodeAttempt(3), {
+    failedAttempts: 4,
+    attemptsRemaining: 1,
+    locked: false,
+  });
+  assert.deepEqual(recordFailedPickupCodeAttempt(4), {
+    failedAttempts: 5,
+    attemptsRemaining: 0,
+    locked: true,
+  });
+  assert.deepEqual(recordFailedPickupCodeAttempt(20), {
+    failedAttempts: 5,
+    attemptsRemaining: 0,
+    locked: true,
+  });
+});
 
 test("women-only rides accept only a female rider profile", () => {
   assert.equal(canRequestGenderRestrictedRide("women_only", "Female"), true);

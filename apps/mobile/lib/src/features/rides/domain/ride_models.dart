@@ -125,6 +125,95 @@ class RideVehicle {
   }
 }
 
+enum LiveTripPhase {
+  pickups,
+  dropoffs,
+  complete;
+
+  static LiveTripPhase fromJson(Object? value) => switch (value) {
+    'dropoffs' => dropoffs,
+    'complete' => complete,
+    _ => pickups,
+  };
+}
+
+enum LiveTripStopKind {
+  pickup,
+  dropoff;
+
+  static LiveTripStopKind fromJson(Object? value) =>
+      value == 'dropoff' ? dropoff : pickup;
+}
+
+class LiveTripStop {
+  const LiveTripStop({
+    required this.bookingId,
+    required this.riderId,
+    required this.riderName,
+    required this.kind,
+    required this.order,
+    required this.location,
+    required this.eta,
+    required this.completedAt,
+  });
+
+  final String bookingId;
+  final String riderId;
+  final String riderName;
+  final LiveTripStopKind kind;
+  final int order;
+  final RideLocation location;
+  final DateTime? eta;
+  final DateTime? completedAt;
+
+  factory LiveTripStop.fromJson(Map<String, dynamic> json) => LiveTripStop(
+    bookingId: json['bookingId'] as String? ?? '',
+    riderId: json['riderId'] as String? ?? '',
+    riderName: json['riderName'] as String? ?? '',
+    kind: LiveTripStopKind.fromJson(json['kind']),
+    order: (json['order'] as num?)?.toInt() ?? 0,
+    location: RideLocation.fromJson(_map(json['location'])),
+    eta: DateTime.tryParse(json['eta'] as String? ?? '')?.toLocal(),
+    completedAt: DateTime.tryParse(
+      json['completedAt'] as String? ?? '',
+    )?.toLocal(),
+  );
+}
+
+class LiveTripPlan {
+  const LiveTripPlan({
+    required this.phase,
+    required this.startedAt,
+    required this.updatedAt,
+    required this.pickupStops,
+    required this.dropoffStops,
+    required this.pickupPolyline,
+    required this.dropoffPolyline,
+  });
+
+  final LiveTripPhase phase;
+  final DateTime? startedAt;
+  final DateTime? updatedAt;
+  final List<LiveTripStop> pickupStops;
+  final List<LiveTripStop> dropoffStops;
+  final String pickupPolyline;
+  final String dropoffPolyline;
+
+  factory LiveTripPlan.fromJson(Map<String, dynamic> json) => LiveTripPlan(
+    phase: LiveTripPhase.fromJson(json['phase']),
+    startedAt: DateTime.tryParse(json['startedAt'] as String? ?? '')?.toLocal(),
+    updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '')?.toLocal(),
+    pickupStops: _list(
+      json['pickupStops'],
+    ).map((item) => LiveTripStop.fromJson(_map(item))).toList(growable: false),
+    dropoffStops: _list(
+      json['dropoffStops'],
+    ).map((item) => LiveTripStop.fromJson(_map(item))).toList(growable: false),
+    pickupPolyline: json['pickupPolyline'] as String? ?? '',
+    dropoffPolyline: json['dropoffPolyline'] as String? ?? '',
+  );
+}
+
 class Ride {
   const Ride({
     required this.id,
@@ -409,3 +498,5 @@ Map<String, dynamic> _map(Object? value) {
   if (value is Map) return value.map((key, item) => MapEntry('$key', item));
   return const {};
 }
+
+List<dynamic> _list(Object? value) => value is List ? value : const [];

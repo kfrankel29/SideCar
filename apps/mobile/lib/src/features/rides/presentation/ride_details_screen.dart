@@ -8,9 +8,11 @@ import 'package:sidecar/src/core/widgets/app_notice.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
+import 'package:sidecar/src/features/bookings/presentation/payment_screens.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/place_picker_sheet.dart';
+import 'package:sidecar/src/features/rides/presentation/live_trip_screen.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_widgets.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
@@ -25,7 +27,7 @@ class RideDetailsScreen extends ConsumerStatefulWidget {
 }
 
 class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
-  late Future<Ride> _ride;
+  late Future<_RideDetailsPayload> _details;
   bool _requesting = false;
   BookingSeat _selectedSeat = BookingSeat.front;
 
@@ -35,8 +37,38 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
     _load();
   }
 
-  void _load() =>
-      _ride = ref.read(rideRepositoryProvider).getRide(widget.rideId);
+  void _load() {
+    _details = _loadDetails();
+  }
+
+  Future<_RideDetailsPayload> _loadDetails() async {
+    final repository = ref.read(rideRepositoryProvider);
+    repository.invalidateRide(widget.rideId);
+    final ride = await repository.getRide(widget.rideId);
+    final userId = ref.read(authRepositoryProvider).currentUser?.id;
+    if (userId == null || userId == ride.driverId) {
+      return _RideDetailsPayload(ride: ride);
+    }
+    List<SeatBooking> bookings;
+    try {
+      bookings = await ref
+          .read(bookingRepositoryProvider)
+          .listMyBookings(forceRefresh: true);
+    } on AppFailure {
+      bookings = const [];
+    }
+    for (final booking in bookings) {
+      if (booking.rideId == ride.id &&
+          const {
+            BookingStatus.confirmed,
+            BookingStatus.inProgress,
+            BookingStatus.completed,
+          }.contains(booking.status)) {
+        return _RideDetailsPayload(ride: ride, booking: booking);
+      }
+    }
+    return _RideDetailsPayload(ride: ride);
+  }
 
   Future<void> _cancelRide(Ride ride) async {
     final confirmed = await showDialog<bool>(
@@ -102,8 +134,8 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FutureBuilder<Ride>(
-        future: _ride,
+      body: FutureBuilder<_RideDetailsPayload>(
+        future: _details,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const SafeArea(
@@ -132,7 +164,8 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
               ),
             );
           }
-          final ride = snapshot.data!;
+          final details = snapshot.data!;
+          final ride = details.ride;
           final isOwner =
               ref.read(authRepositoryProvider).currentUser?.id == ride.driverId;
           return _RideDetails(
@@ -143,11 +176,19 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
             onRequest: () => _requestSeat(ride),
             selectedSeat: _selectedSeat,
             onSeatSelected: (seat) => setState(() => _selectedSeat = seat),
+            booking: details.booking,
           );
         },
       ),
     );
   }
+}
+
+class _RideDetailsPayload {
+  const _RideDetailsPayload({required this.ride, this.booking});
+
+  final Ride ride;
+  final SeatBooking? booking;
 }
 
 class _RideDetails extends StatelessWidget {
@@ -159,6 +200,7 @@ class _RideDetails extends StatelessWidget {
     required this.onRequest,
     required this.selectedSeat,
     required this.onSeatSelected,
+    required this.booking,
   });
 
   final Ride ride;
@@ -168,13 +210,20 @@ class _RideDetails extends StatelessWidget {
   final VoidCallback onRequest;
   final BookingSeat selectedSeat;
   final ValueChanged<BookingSeat> onSeatSelected;
+  final SeatBooking? booking;
 
   @override
   Widget build(BuildContext context) {
     final topInset = MediaQuery.paddingOf(context).top;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
     if (isOwner) {
+      if (ride.status == 'in_progress') {
+        return LiveTripScreen(ride: ride, isDriver: true);
+      }
       return _OwnerRideDetailsPage(ride: ride, onCancel: onCancel);
+    }
+    if (ride.status == 'in_progress' && booking != null) {
+      return LiveTripScreen(ride: ride, isDriver: false, riderBooking: booking);
     }
     return Column(
       children: [
@@ -236,8 +285,8 @@ class _RideDetails extends StatelessWidget {
                                       if (ride.driverRating > 0)
                                         '★ ${ride.driverRating.toStringAsFixed(1)}',
                                       '${ride.driverTrips} trips',
-                                      if (ride.vehicle.year > 0)
-                                        '${ride.vehicle.year}',
+                                      if (ride.vehicle.makeAndModel.isNotEmpty)
+                                        ride.vehicle.makeAndModel,
                                     ].join(' · '),
                                     style: Theme.of(
                                       context,
@@ -265,6 +314,10 @@ class _RideDetails extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 24),
+                    if (booking != null) ...[
+                      _BookedTripDetails(booking: booking!),
+                      const SizedBox(height: 22),
+                    ],
                     Row(
                       children: [
                         Expanded(
@@ -282,8 +335,9 @@ class _RideDetails extends StatelessWidget {
                     const SizedBox(height: 13),
                     _SeatDiagram(
                       ride: ride,
-                      selectedSeat: selectedSeat,
-                      onSelected: onSeatSelected,
+                      selectedSeat: booking?.seat ?? selectedSeat,
+                      onSelected: booking == null ? onSeatSelected : (_) {},
+                      interactive: booking == null,
                     ),
                     const SizedBox(height: 20),
                     Row(
@@ -320,11 +374,15 @@ class _RideDetails extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${ride.priceLabel} / seat',
+                      booking == null
+                          ? '${ride.priceLabel} / seat'
+                          : _bookedTripTitle(booking!),
                       style: Theme.of(context).textTheme.headlineLarge,
                     ),
                     Text(
-                      '${selectedSeat.label} seat · ${ride.seatsAvailable} of ${ride.seatsTotal} left',
+                      booking == null
+                          ? '${selectedSeat.label} seat · ${ride.seatsAvailable} of ${ride.seatsTotal} left'
+                          : '${booking!.seat.label} seat · ${_bookedTripStatus(booking!)}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -332,17 +390,82 @@ class _RideDetails extends StatelessWidget {
               ),
               SizedBox(
                 width: 180,
-                child: FilledButton(
-                  onPressed: requesting || ride.seatsAvailable < 1
-                      ? null
-                      : AppHaptics.wrap(onRequest),
-                  child: Text(requesting ? 'Sending…' : 'Request seat'),
-                ),
+                child: booking == null
+                    ? FilledButton(
+                        onPressed: requesting || ride.seatsAvailable < 1
+                            ? null
+                            : AppHaptics.wrap(onRequest),
+                        child: Text(requesting ? 'Sending…' : 'Request seat'),
+                      )
+                    : FilledButton(
+                        onPressed: booking!.status == BookingStatus.confirmed
+                            ? () => Navigator.of(context).push<void>(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      PickupCodeScreen(booking: booking!),
+                                ),
+                              )
+                            : null,
+                        child: Text(
+                          booking!.status == BookingStatus.confirmed
+                              ? 'View pickup code'
+                              : _bookedTripStatus(booking!),
+                        ),
+                      ),
               ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+String _bookedTripTitle(SeatBooking booking) => switch (booking.status) {
+  BookingStatus.inProgress => 'Trip in progress',
+  BookingStatus.completed => 'Trip complete',
+  _ => 'Your ride',
+};
+
+String _bookedTripStatus(SeatBooking booking) => switch (booking.status) {
+  BookingStatus.inProgress => 'In progress',
+  BookingStatus.completed => 'Completed',
+  _ => 'Confirmed',
+};
+
+class _BookedTripDetails extends StatelessWidget {
+  const _BookedTripDetails({required this.booking});
+
+  final SeatBooking booking;
+
+  @override
+  Widget build(BuildContext context) {
+    final pickup = booking.pickupLocation;
+    final dropoff = booking.dropoffLocation;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.softSurface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Your trip', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          if (pickup != null)
+            Text(
+              'Pickup · ${pickup.formattedAddress}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (pickup != null && dropoff != null) const SizedBox(height: 5),
+          if (dropoff != null)
+            Text(
+              'Drop-off · ${dropoff.formattedAddress}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+        ],
+      ),
     );
   }
 }
@@ -360,10 +483,15 @@ class _OwnerRideDetailsPage extends ConsumerStatefulWidget {
 
 class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
   late Future<List<SeatBooking>> _bookings;
+  bool _startingTrip = false;
 
   @override
   void initState() {
     super.initState();
+    _reloadBookings();
+  }
+
+  void _reloadBookings() {
     _bookings = ref
         .read(bookingRepositoryProvider)
         .listRideRequests(rideId: widget.ride.id, forceRefresh: true);
@@ -465,9 +593,22 @@ class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _DetailValue(
-                  label: 'Rider preference',
-                  value: ride.genderRestriction.label,
+                Row(
+                  children: [
+                    Expanded(
+                      child: _DetailValue(
+                        label: 'Rider preference',
+                        value: ride.genderRestriction.label,
+                      ),
+                    ),
+                    if (ride.vehicle.makeAndModel.isNotEmpty)
+                      Expanded(
+                        child: _DetailValue(
+                          label: 'Vehicle',
+                          value: ride.vehicle.makeAndModel,
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 36),
                 Text(
@@ -575,10 +716,12 @@ class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
                         )
                         .toList();
                     return FilledButton(
-                      onPressed: confirmed.isEmpty
+                      onPressed: confirmed.isEmpty || _startingTrip
                           ? null
-                          : () => _showPickupCodeSheet(confirmed),
-                      child: const Text('Start trip'),
+                          : _startTrip,
+                      child: Text(
+                        _startingTrip ? 'Optimizing route…' : 'Start trip',
+                      ),
                     );
                   },
                 ),
@@ -590,84 +733,30 @@ class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
     );
   }
 
-  Future<void> _showPickupCodeSheet(List<SeatBooking> bookings) async {
-    final controller = TextEditingController();
-    SeatBooking selected = bookings.first;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            24,
-            24,
-            24,
-            MediaQuery.viewInsetsOf(context).bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Enter pickup code',
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Ask the rider for the 4-digit code before starting the trip.',
-              ),
-              if (bookings.length > 1) ...[
-                const SizedBox(height: 12),
-                DropdownButtonFormField<SeatBooking>(
-                  initialValue: selected,
-                  items: [
-                    for (final booking in bookings)
-                      DropdownMenuItem(
-                        value: booking,
-                        child: Text(booking.riderName),
-                      ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setSheetState(() => selected = value);
-                  },
-                ),
-              ],
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                decoration: const InputDecoration(labelText: 'Pickup code'),
-              ),
-              FilledButton(
-                onPressed: () async {
-                  try {
-                    await ref
-                        .read(bookingRepositoryProvider)
-                        .verifyPickupCode(selected.id, controller.text);
-                    if (context.mounted) {
-                      showAppNotice(context, 'Pickup confirmed. Trip started.');
-                      Navigator.pop(context);
-                    }
-                  } on AppFailure catch (error) {
-                    if (context.mounted) {
-                      showAppNotice(
-                        context,
-                        error.message,
-                        kind: AppNoticeKind.error,
-                      );
-                    }
-                  }
-                },
-                child: const Text('Verify and start trip'),
-              ),
-            ],
+  Future<void> _startTrip() async {
+    setState(() => _startingTrip = true);
+    try {
+      final plan = await ref
+          .read(rideRepositoryProvider)
+          .startLiveTrip(widget.ride.id);
+      if (!mounted) return;
+      showAppNotice(context, 'Trip started. Your optimized route is ready.');
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => LiveTripScreen(
+            ride: widget.ride.copyWith(status: 'in_progress'),
+            isDriver: true,
+            initialPlan: plan,
           ),
         ),
-      ),
-    );
-    controller.dispose();
+      );
+    } on AppFailure catch (error) {
+      if (mounted) {
+        showAppNotice(context, error.message, kind: AppNoticeKind.error);
+      }
+    } finally {
+      if (mounted) setState(() => _startingTrip = false);
+    }
   }
 }
 
@@ -775,11 +864,13 @@ class _SeatDiagram extends StatelessWidget {
     required this.ride,
     required this.selectedSeat,
     required this.onSelected,
+    this.interactive = true,
   });
 
   final Ride ride;
   final BookingSeat selectedSeat;
   final ValueChanged<BookingSeat> onSelected;
+  final bool interactive;
 
   @override
   Widget build(BuildContext context) {
@@ -810,7 +901,9 @@ class _SeatDiagram extends StatelessWidget {
                   label: seats[0],
                   price: ride.priceLabel,
                   selected: selectedSeat == BookingSeat.front,
-                  onTap: () => onSelected(BookingSeat.front),
+                  onTap: interactive
+                      ? () => onSelected(BookingSeat.front)
+                      : null,
                 ),
               ),
             ],
@@ -832,7 +925,9 @@ class _SeatDiagram extends StatelessWidget {
                   label: seats[1],
                   price: ride.priceLabel,
                   selected: selectedSeat == BookingSeat.rearLeft,
-                  onTap: () => onSelected(BookingSeat.rearLeft),
+                  onTap: interactive
+                      ? () => onSelected(BookingSeat.rearLeft)
+                      : null,
                 ),
               ),
               const SizedBox(width: 10),
@@ -841,7 +936,9 @@ class _SeatDiagram extends StatelessWidget {
                   label: seats[2],
                   price: ride.priceLabel,
                   selected: selectedSeat == BookingSeat.rearRight,
-                  onTap: () => onSelected(BookingSeat.rearRight),
+                  onTap: interactive
+                      ? () => onSelected(BookingSeat.rearRight)
+                      : null,
                 ),
               ),
             ],

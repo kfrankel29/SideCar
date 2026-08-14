@@ -22,7 +22,11 @@ import {
 } from "./ride_routing.js";
 import {weeklyDepartures} from "./ride_recurrence.js";
 import {compareClosestDepartures} from "./ride_search.js";
-import {publicSeatInventory, rideIntervalsOverlap} from "./ride_management.js";
+import {
+  normalizeImmediateDeparture,
+  publicSeatInventory,
+  rideIntervalsOverlap,
+} from "./ride_management.js";
 import {preferredDriverPhotoUrl} from "./ride_driver_profile.js";
 import {AsyncTtlCache} from "./async_ttl_cache.js";
 import {
@@ -451,12 +455,13 @@ export const createRide = onCall(
     if (originPlaceId === destinationPlaceId) {
       throw new HttpsError("invalid-argument", "Choose two different places.");
     }
-    const departureAt = timestamp(data.departureAt, "Departure time");
+    let departureAt = timestamp(data.departureAt, "Departure time");
     const now = Date.now();
-    if (departureAt.toMillis() < now + 30 * 60_000 ||
-        departureAt.toMillis() > now + 366 * 24 * 60 * 60_000) {
-      throw new HttpsError("invalid-argument", "Choose a future departure time.");
+    const normalizedDeparture = normalizeImmediateDeparture(departureAt.toMillis(), now);
+    if (normalizedDeparture === null) {
+      throw new HttpsError("invalid-argument", "Choose a departure time that has not passed.");
     }
+    departureAt = Timestamp.fromMillis(normalizedDeparture);
     const seats = integer(data.seats, "Seats", 1, 6);
     const requestedPriceCents = integer(data.pricePerSeatCents, "Price", 1, 100_000);
     const luggageAllowance = choice(
@@ -847,8 +852,22 @@ export const getRide = onCall(
     const rideId = stringValue(object(request.data).rideId, "Ride", 128);
     const snapshot = await db.collection("rides").doc(rideId).get();
     const ride = snapshot.data();
-    if (!ride || (ride.status !== "published" && ride.driverId !== request.auth.uid)) {
+    if (!ride) {
       throw new HttpsError("not-found", "That ride is no longer available.");
+    }
+    let isParticipant = false;
+    if (ride.driverId !== request.auth.uid && ride.status !== "published") {
+      const participant = await db.collection("bookings")
+        .where("rideId", "==", rideId)
+        .where("riderId", "==", request.auth.uid)
+        .limit(10)
+        .get();
+      isParticipant = participant.docs.some((document) =>
+        ["confirmed", "in_progress", "completed"]
+          .includes(String(document.data().status)));
+      if (!isParticipant) {
+        throw new HttpsError("not-found", "That ride is no longer available.");
+      }
     }
     if (ride.driverId !== request.auth.uid) {
       const blocked = await blockedDriverIds(
@@ -903,7 +922,7 @@ export const rideMapPreview = onRequest(
     }
     const snapshot = await db.collection("rides").doc(rideId).get();
     const ride = snapshot.data();
-    if (!ride || ride.status !== "published") {
+    if (!ride || !["published", "in_progress"].includes(String(ride.status))) {
       response.status(404).send("Ride not found");
       return;
     }

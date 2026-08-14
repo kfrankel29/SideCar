@@ -29,6 +29,8 @@ export {
   updateRide,
 } from "./rides.js";
 
+export {getLiveTrip, startLiveTrip} from "./live_trips.js";
+
 export {
   blockUser,
   cancelDriverRide,

@@ -1,14 +1,22 @@
 import 'dart:convert';
 
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:flutter/foundation.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/core/firebase/app_bootstrap.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
+import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
+import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
+import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
+import 'package:sidecar/src/features/rides/presentation/ride_home_screen.dart';
+import 'package:sidecar/src/theme/app_theme.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -37,6 +45,39 @@ void main() {
           driverPassword: driverPassword,
           riderEmail: riderEmail,
           riderPassword: riderPassword,
+        );
+        return;
+      case 'interactive-payment-start-trip':
+        await _verifyInteractivePaymentAndPickup(
+          bootstrap,
+          tester: tester,
+          driverEmail: driverEmail,
+          driverPassword: driverPassword,
+          riderEmail: riderEmail,
+          riderPassword: riderPassword,
+        );
+        return;
+      case 'verify-live-home':
+        await bootstrap.authRepository.signOut();
+        await _signIn(bootstrap, email: driverEmail, password: driverPassword);
+        await _verifyLiveRideHomeEntry(
+          tester: tester,
+          bootstrap: bootstrap,
+          isDriver: true,
+        );
+        await bootstrap.authRepository.signOut();
+        await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+        await _verifyLiveRideHomeEntry(
+          tester: tester,
+          bootstrap: bootstrap,
+          isDriver: false,
+        );
+        return;
+      case 'verify-immediate-post':
+        await _verifyImmediateRidePost(
+          bootstrap,
+          driverEmail: driverEmail,
+          driverPassword: driverPassword,
         );
         return;
       case 'verify-payment':
@@ -99,6 +140,251 @@ void main() {
         fail('Set M4_E2E_PHASE to a supported live test phase.');
     }
   });
+}
+
+Future<void> _verifyImmediateRidePost(
+  AppBootstrapResult bootstrap, {
+  required String driverEmail,
+  required String driverPassword,
+}) async {
+  await bootstrap.authRepository.signOut();
+  await _signIn(bootstrap, email: driverEmail, password: driverPassword);
+  final origin = await _firstPlace(
+    bootstrap,
+    'University of California Santa Barbara',
+  );
+  final destination = await _firstPlace(bootstrap, 'Santa Barbara Airport');
+  final requestedDeparture = DateTime.now().add(const Duration(seconds: 5));
+  Ride? ride;
+  try {
+    ride = await bootstrap.rideRepository.createRide(
+      RideDraft(
+        origin: origin,
+        destination: destination,
+        departureAt: requestedDeparture,
+        seats: 1,
+        pricePerSeatCents: 100,
+        luggageAllowance: LuggageAllowance.backpack,
+        genderRestriction: RideGenderRestriction.any,
+      ),
+    );
+    expect(
+      ride.departureAt.difference(requestedDeparture).abs(),
+      lessThan(const Duration(minutes: 1)),
+    );
+  } finally {
+    if (ride != null) {
+      await bootstrap.rideRepository.cancelRide(ride.id);
+    }
+  }
+}
+
+Future<void> _verifyInteractivePaymentAndPickup(
+  AppBootstrapResult bootstrap, {
+  required WidgetTester tester,
+  required String driverEmail,
+  required String driverPassword,
+  required String riderEmail,
+  required String riderPassword,
+}) async {
+  await bootstrap.authRepository.signOut();
+  await _signIn(bootstrap, email: driverEmail, password: driverPassword);
+  const appCheckRegistrationPause = int.fromEnvironment(
+    'M4_E2E_APP_CHECK_PAUSE_SECONDS',
+  );
+  if (appCheckRegistrationPause > 0) {
+    await Future<void>.delayed(Duration(seconds: appCheckRegistrationPause));
+  }
+  Ride? ride;
+  SeatBooking? requested;
+  try {
+    final payoutStatus = await bootstrap.bookingRepository
+        .getDriverPayoutStatus();
+    expect(payoutStatus.connected, isTrue);
+    expect(payoutStatus.payoutsEnabled, isTrue);
+
+    final origin = await _firstPlace(
+      bootstrap,
+      'University of California Santa Barbara',
+    );
+    final destination = await _firstPlace(
+      bootstrap,
+      'San Francisco International Airport',
+    );
+    ride = await bootstrap.rideRepository.createRide(
+      RideDraft(
+        origin: origin,
+        destination: destination,
+        departureAt: DateTime.now().add(const Duration(days: 100)),
+        seats: 1,
+        pricePerSeatCents: 2500,
+        luggageAllowance: LuggageAllowance.oneSuitcase,
+        genderRestriction: RideGenderRestriction.any,
+      ),
+    );
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    requested = await bootstrap.bookingRepository.requestSeat(
+      SeatRequest(
+        rideId: ride.id,
+        seat: BookingSeat.front,
+        pickupPlaceId: ride.origin.placeId,
+        dropoffPlaceId: ride.destination.placeId,
+      ),
+    );
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: driverEmail, password: driverPassword);
+    final accepted = await bootstrap.bookingRepository.respondToRequest(
+      requested.id,
+      accept: true,
+    );
+    expect(accepted.status, BookingStatus.acceptedPaymentPending);
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    final paid = await bootstrap.bookingRepository.payForBooking(
+      requested.id,
+      BookingPaymentMethod.card,
+    );
+    expect(paid.status, BookingStatus.confirmed);
+    expect(paid.paymentStatus, 'paid');
+    expect(paid.pickupCode, matches(RegExp(r'^\d{4}$')));
+    final pickupCode = paid.pickupCode!;
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: driverEmail, password: driverPassword);
+    final driverPlan = await bootstrap.rideRepository.startLiveTrip(ride.id);
+    expect(driverPlan.phase, LiveTripPhase.pickups);
+    expect(driverPlan.pickupStops, hasLength(1));
+    expect(driverPlan.dropoffStops, hasLength(1));
+    expect(driverPlan.pickupStops.single.bookingId, requested.id);
+    expect(driverPlan.dropoffStops.single.bookingId, requested.id);
+    expect(driverPlan.pickupStops.single.riderName, isNotEmpty);
+    expect(driverPlan.pickupStops.single.eta, isNotNull);
+    expect(driverPlan.dropoffStops.single.eta, isNotNull);
+    await _verifyLiveRideHomeEntry(
+      tester: tester,
+      bootstrap: bootstrap,
+      isDriver: true,
+    );
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    final riderPlan = await bootstrap.rideRepository.getLiveTrip(ride.id);
+    expect(riderPlan.pickupStops.single.bookingId, requested.id);
+    expect(riderPlan.dropoffStops.single.bookingId, requested.id);
+    await _verifyLiveRideHomeEntry(
+      tester: tester,
+      bootstrap: bootstrap,
+      isDriver: false,
+    );
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: driverEmail, password: driverPassword);
+    final wrongCode = pickupCode == '0000' ? '1111' : '0000';
+    await expectLater(
+      bootstrap.bookingRepository.verifyPickupCode(requested.id, wrongCode),
+      throwsA(isA<AppFailure>()),
+    );
+    await bootstrap.bookingRepository.verifyPickupCode(
+      requested.id,
+      pickupCode,
+    );
+    final started = await bootstrap.bookingRepository.refreshBooking(
+      requested.id,
+    );
+    expect(started.status, BookingStatus.inProgress);
+    final dropoffPlan = await bootstrap.rideRepository.getLiveTrip(ride.id);
+    expect(dropoffPlan.phase, LiveTripPhase.dropoffs);
+    expect(dropoffPlan.pickupStops.single.completedAt, isNotNull);
+    expect(dropoffPlan.dropoffStops.single.bookingId, requested.id);
+    debugPrint(
+      'M4_E2E_RESULT=${jsonEncode({'rideId': ride.id, 'bookingId': requested.id, 'payment': 'paid', 'liveTrip': 'visible-to-both-roles', 'pickup': 'verified', 'phase': dropoffPlan.phase.name, 'status': started.status.wireValue})}',
+    );
+  } finally {
+    if (ride != null && requested == null) {
+      await bootstrap.authRepository.signOut();
+      await _signIn(bootstrap, email: driverEmail, password: driverPassword);
+      await bootstrap.rideRepository.cancelRide(ride.id);
+    }
+  }
+}
+
+Future<void> _verifyLiveRideHomeEntry({
+  required WidgetTester tester,
+  required AppBootstrapResult bootstrap,
+  required bool isDriver,
+}) async {
+  final profile = await bootstrap.profileRepository.loadCurrentProfile();
+  expect(profile, isNotNull);
+  runApp(
+    ProviderScope(
+      key: UniqueKey(),
+      overrides: [
+        authRepositoryProvider.overrideWithValue(bootstrap.authRepository),
+        currentProfileProvider.overrideWith(
+          (ref) => Stream.value(
+            profile!.copyWith(
+              primaryRole: isDriver ? PrimaryRole.driver : PrimaryRole.rider,
+            ),
+          ),
+        ),
+        rideRepositoryProvider.overrideWithValue(bootstrap.rideRepository),
+        bookingRepositoryProvider.overrideWithValue(
+          bootstrap.bookingRepository,
+        ),
+      ],
+      child: MaterialApp(
+        key: UniqueKey(),
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        home: const RideHomeScreen(),
+      ),
+    ),
+  );
+  await tester.pump();
+  final deadline = DateTime.now().add(const Duration(seconds: 15));
+  while (find.text('Live Ride').evaluate().isEmpty &&
+      DateTime.now().isBefore(deadline)) {
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+
+  expect(find.text('Live Ride'), findsOneWidget);
+  final followingSection = isDriver ? 'Your upcoming rides' : 'Leaving soon';
+  final liveRideTop = tester.getTopLeft(find.text('Live Ride')).dy;
+  final followingTop = tester.getTopLeft(find.text(followingSection)).dy;
+  expect(liveRideTop, lessThan(followingTop));
+
+  final entry = isDriver
+      ? find.text('Trip in progress · View route and riders')
+      : find.text('Trip in progress · View live ride details');
+  expect(entry, findsOneWidget);
+  await tester.ensureVisible(entry);
+  await tester.tap(entry);
+  final liveScreenDeadline = DateTime.now().add(const Duration(seconds: 15));
+  while (find.text('Live trip').evaluate().isEmpty &&
+      DateTime.now().isBefore(liveScreenDeadline)) {
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+  expect(find.text('Live trip'), findsOneWidget);
+  expect(find.text('Pickup order'), findsOneWidget);
+  expect(find.text('Drop-off order'), findsOneWidget);
+  expect(find.textContaining('Honda'), findsWidgets);
+}
+
+Future<void> _signIn(
+  AppBootstrapResult bootstrap, {
+  required String email,
+  required String password,
+}) async {
+  await bootstrap.authRepository.signIn(email: email, password: password);
+  final user = FirebaseAuth.instance.currentUser;
+  expect(user, isNotNull);
+  final token = await user!.getIdToken(true);
+  expect(token, isNotEmpty);
+  await Future<void>.delayed(const Duration(milliseconds: 250));
 }
 
 Future<void> _verifyFeedbackRules(
@@ -393,13 +679,22 @@ Future<void> _startTrip(
     email: driverEmail,
     password: driverPassword,
   );
+  final booking = await bootstrap.bookingRepository.refreshBooking(bookingId);
+  final initialPlan = await bootstrap.rideRepository.startLiveTrip(
+    booking.rideId,
+  );
+  expect(initialPlan.phase, LiveTripPhase.pickups);
   await expectLater(
     bootstrap.bookingRepository.verifyPickupCode(bookingId, '0000'),
     throwsA(isA<AppFailure>()),
   );
   await bootstrap.bookingRepository.verifyPickupCode(bookingId, pickupCode);
-  final booking = await bootstrap.bookingRepository.refreshBooking(bookingId);
-  expect(booking.status, BookingStatus.inProgress);
+  final started = await bootstrap.bookingRepository.refreshBooking(bookingId);
+  expect(started.status, BookingStatus.inProgress);
+  final dropoffPlan = await bootstrap.rideRepository.getLiveTrip(
+    booking.rideId,
+  );
+  expect(dropoffPlan.phase, LiveTripPhase.dropoffs);
 }
 
 Future<void> _completeTrip(

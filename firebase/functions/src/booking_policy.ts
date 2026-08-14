@@ -31,6 +31,30 @@ export interface RefundAmounts {
   tier: RefundTier;
 }
 
+export interface PickupCodeAttempt {
+  failedAttempts: number;
+  attemptsRemaining: number;
+  locked: boolean;
+}
+
+export function recordFailedPickupCodeAttempt(
+  currentFailedAttempts: unknown,
+  maximumAttempts = 5,
+): PickupCodeAttempt {
+  if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1) {
+    throw new Error("invalid-pickup-code-attempt-limit");
+  }
+  const current = typeof currentFailedAttempts === "number" &&
+    Number.isFinite(currentFailedAttempts) ?
+    Math.max(0, Math.floor(currentFailedAttempts)) : 0;
+  const failedAttempts = Math.min(maximumAttempts, current + 1);
+  return {
+    failedAttempts,
+    attemptsRemaining: maximumAttempts - failedAttempts,
+    locked: failedAttempts >= maximumAttempts,
+  };
+}
+
 export function canRequestGenderRestrictedRide(
   restriction: unknown,
   riderGender: unknown,

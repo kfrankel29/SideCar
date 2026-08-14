@@ -358,6 +358,13 @@ class _QaRideRepository implements RideRepository {
   Future<Ride> getRide(String rideId) async => _ride;
 
   @override
+  Future<LiveTripPlan> getLiveTrip(String rideId) => throw UnimplementedError();
+
+  @override
+  Future<LiveTripPlan> startLiveTrip(String rideId) =>
+      throw UnimplementedError();
+
+  @override
   Future<List<Ride>> listLeavingSoon({bool forceRefresh = false}) async => [
     _ride,
   ];

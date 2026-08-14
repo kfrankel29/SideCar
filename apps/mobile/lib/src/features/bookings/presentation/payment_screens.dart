@@ -510,7 +510,7 @@ class PickupCodeScreen extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: FilledButton(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: () => Navigator.pop(context, true),
                       child: const Text('View trip'),
                     ),
                   ),

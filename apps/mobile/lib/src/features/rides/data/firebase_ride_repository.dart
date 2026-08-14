@@ -81,6 +81,19 @@ class FirebaseRideRepository implements RideRepository {
   }
 
   @override
+  Future<LiveTripPlan> startLiveTrip(String rideId) async {
+    final data = await _call('startLiveTrip', {'rideId': rideId});
+    invalidateRide(rideId);
+    return LiveTripPlan.fromJson(_map(data['liveTrip']));
+  }
+
+  @override
+  Future<LiveTripPlan> getLiveTrip(String rideId) async {
+    final data = await _call('getLiveTrip', {'rideId': rideId});
+    return LiveTripPlan.fromJson(_map(data['liveTrip']));
+  }
+
+  @override
   Future<List<Ride>> listMyRides({bool forceRefresh = false}) async {
     return _myRidesCache.get(_rideCacheDuration, () async {
       final data = await _call('listMyRides', const {});
@@ -170,6 +183,12 @@ class UnavailableRideRepository implements RideRepository {
 
   @override
   Future<Ride> getRide(String rideId) async => _notReady();
+
+  @override
+  Future<LiveTripPlan> startLiveTrip(String rideId) async => _notReady();
+
+  @override
+  Future<LiveTripPlan> getLiveTrip(String rideId) async => _notReady();
 
   @override
   Future<List<Ride>> listMyRides({bool forceRefresh = false}) async =>

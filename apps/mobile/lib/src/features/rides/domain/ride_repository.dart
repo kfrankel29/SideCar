@@ -9,6 +9,8 @@ abstract interface class RideRepository {
   Future<List<Ride>> searchRides(RideSearchCriteria criteria);
   Future<List<Ride>> listLeavingSoon({bool forceRefresh = false});
   Future<Ride> getRide(String rideId);
+  Future<LiveTripPlan> startLiveTrip(String rideId);
+  Future<LiveTripPlan> getLiveTrip(String rideId);
   Future<List<Ride>> listMyRides({bool forceRefresh = false});
   void invalidateRide(String rideId);
 }

@@ -913,8 +913,8 @@ class _DriverRequestsListState extends ConsumerState<_DriverRequestsList> {
                         Expanded(
                           child: FilledButton(
                             style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFFFFE2DE),
-                              foregroundColor: AppColors.danger,
+                              backgroundColor: AppColors.danger,
+                              foregroundColor: Colors.white,
                             ),
                             onPressed: busy
                                 ? null
@@ -925,6 +925,10 @@ class _DriverRequestsListState extends ConsumerState<_DriverRequestsList> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF167A52),
+                              foregroundColor: Colors.white,
+                            ),
                             onPressed: busy
                                 ? null
                                 : () => _respond(booking, true),
@@ -1007,11 +1011,14 @@ class _RiderBookingCardState extends ConsumerState<_RiderBookingCard> {
         'Paid · pickup code ready',
         'View code',
         () async {
-          await Navigator.of(context).push<void>(
+          final viewTrip = await Navigator.of(context).push<bool>(
             MaterialPageRoute(
               builder: (_) => PickupCodeScreen(booking: booking),
             ),
           );
+          if (viewTrip == true && context.mounted) {
+            context.push('/rides/${booking.rideId}');
+          }
         },
       ),
       _ => (_bookingStatusLabel(booking.status), '', () async {}),
