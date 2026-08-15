@@ -22,7 +22,11 @@ import {
   decodeGooglePolyline,
   routePointAllowed,
 } from "./ride_routing.js";
-import {liveTripMapsSecret, refreshLiveTripAfterPickup} from "./live_trips.js";
+import {
+  finishLiveTrip,
+  liveTripMapsSecret,
+  refreshLiveTripAfterPickup,
+} from "./live_trips.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -1516,6 +1520,7 @@ export const verifyPickupCode = onCall(
 
 async function completeAndPayBooking(
   reference: FirebaseFirestore.DocumentReference,
+  allowEarlyCompletion = false,
 ): Promise<boolean> {
   let booking: Json | undefined;
   await db.runTransaction(async (transaction) => {
@@ -1530,7 +1535,7 @@ async function completeAndPayBooking(
       current.payoutStatus === "failed";
     if (current.status !== "in_progress" && !isFailedPayoutRetry) return;
     const completionAt = current.estimatedCompletionAt as Timestamp | undefined;
-    if (!completionAt || completionAt.toMillis() > Date.now()) return;
+    if (!completionAt || (!allowEarlyCompletion && completionAt.toMillis() > Date.now())) return;
     const payoutAttempt = Math.max(0, Number(current.payoutAttempt ?? 0)) + 1;
     booking = {...current, payoutAttempt};
     transaction.update(reference, {
@@ -1595,6 +1600,108 @@ export const completeTrip = onCall(
       throw new HttpsError("failed-precondition", "The trip cannot be completed yet.");
     }
     return {status: "completed"};
+  },
+);
+
+export const completeDriverTrip = onCall(
+  {
+    region,
+    enforceAppCheck: true,
+    secrets: [stripePaymentsSecretKey],
+    maxInstances: 30,
+    timeoutSeconds: 120,
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    const rideId = stringValue(object(request.data).rideId, "Ride", 128);
+    const ride = (await db.collection("rides").doc(rideId).get()).data();
+    if (!ride || ride.driverId !== request.auth.uid) {
+      throw new HttpsError("permission-denied", "You cannot complete this trip.");
+    }
+    if (ride.status === "completed") return {status: "completed"};
+    if (ride.status !== "in_progress") {
+      throw new HttpsError("failed-precondition", "This trip is not active.");
+    }
+    const snapshot = await db.collection("bookings")
+      .where("rideId", "==", rideId)
+      .limit(10)
+      .get();
+    const waiting = snapshot.docs.filter((document) =>
+      document.data().status === "confirmed");
+    if (waiting.length > 0) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Confirm every rider pickup before completing the ride.",
+      );
+    }
+    const active = snapshot.docs.filter((document) =>
+      ["in_progress", "payout_held"].includes(String(document.data().status)));
+    await Promise.all(active.map((document) =>
+      completeAndPayBooking(document.ref, true)));
+    await finishLiveTrip(rideId, request.auth.uid);
+    return {status: "completed", riderCount: active.length};
+  },
+);
+
+export const rateCompletedTrip = onCall(
+  {region, enforceAppCheck: true, maxInstances: 60},
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    const data = object(request.data);
+    const bookingId = stringValue(data.bookingId, "Booking", 128);
+    const driverRating = Number(data.driverRating);
+    const tripRating = Number(data.tripRating);
+    const comment = typeof data.comment === "string" ? data.comment.trim() : "";
+    if (![driverRating, tripRating].every((value) =>
+      Number.isInteger(value) && value >= 1 && value <= 5)) {
+      throw new HttpsError("invalid-argument", "Choose a rating from 1 to 5.");
+    }
+    if (comment.length > 800) {
+      throw new HttpsError("invalid-argument", "Your feedback is too long.");
+    }
+    const bookingReference = db.collection("bookings").doc(bookingId);
+    const ratingReference = db.collection("trip_ratings").doc(bookingId);
+    const created = await db.runTransaction(async (transaction) => {
+      const bookingSnapshot = await transaction.get(bookingReference);
+      const booking = bookingSnapshot.data();
+      if (!booking || booking.riderId !== request.auth?.uid) {
+        throw new HttpsError("permission-denied", "You cannot rate this trip.");
+      }
+      if (!["completed", "payout_held"].includes(String(booking.status))) {
+        throw new HttpsError("failed-precondition", "Complete the trip before rating it.");
+      }
+      const existing = await transaction.get(ratingReference);
+      if (existing.exists) return false;
+      const driverReference = db.collection("users").doc(String(booking.driverId));
+      const driverSnapshot = await transaction.get(driverReference);
+      const driver = driverSnapshot.data() ?? {};
+      const ratingCount = Math.max(0, Number(driver.driverRatingCount ?? 0));
+      const currentRating = Math.max(0, Number(driver.driverRating ?? driver.rating ?? 0));
+      const nextCount = ratingCount + 1;
+      const nextRating = ((currentRating * ratingCount) + driverRating) / nextCount;
+      transaction.create(ratingReference, {
+        bookingId,
+        rideId: booking.rideId,
+        riderId: request.auth!.uid,
+        driverId: booking.driverId,
+        driverRating,
+        tripRating,
+        comment,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      transaction.set(driverReference, {
+        driverRating: nextRating,
+        rating: nextRating,
+        driverRatingCount: nextCount,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+      transaction.update(bookingReference, {
+        ratedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+    return {status: created ? "rated" : "already_rated"};
   },
 );
 

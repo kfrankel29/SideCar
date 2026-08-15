@@ -300,8 +300,31 @@ Future<void> _verifyInteractivePaymentAndPickup(
     expect(dropoffPlan.phase, LiveTripPhase.dropoffs);
     expect(dropoffPlan.pickupStops.single.completedAt, isNotNull);
     expect(dropoffPlan.dropoffStops.single.bookingId, requested.id);
+
+    await bootstrap.bookingRepository.completeDriverTrip(ride.id);
+    final completedRide = await bootstrap.rideRepository.getRide(ride.id);
+    expect(completedRide, isNotNull);
+    expect(completedRide.status, 'completed');
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    final completedPlan = await bootstrap.rideRepository.getLiveTrip(ride.id);
+    expect(completedPlan.phase, LiveTripPhase.complete);
+    final completedBooking = await bootstrap.bookingRepository.refreshBooking(
+      requested.id,
+    );
+    expect(
+      completedBooking.status,
+      anyOf(BookingStatus.completed, BookingStatus.payoutHeld),
+    );
+    await bootstrap.bookingRepository.rateTrip(
+      bookingId: requested.id,
+      driverRating: 5,
+      tripRating: 5,
+      comment: 'Completed M4 live-trip verification.',
+    );
     debugPrint(
-      'M4_E2E_RESULT=${jsonEncode({'rideId': ride.id, 'bookingId': requested.id, 'payment': 'paid', 'liveTrip': 'visible-to-both-roles', 'pickup': 'verified', 'phase': dropoffPlan.phase.name, 'status': started.status.wireValue})}',
+      'M4_E2E_RESULT=${jsonEncode({'rideId': ride.id, 'bookingId': requested.id, 'payment': 'paid', 'liveTrip': 'visible-to-both-roles', 'pickup': 'verified', 'phase': completedPlan.phase.name, 'status': completedBooking.status.wireValue, 'rating': 'submitted'})}',
     );
   } finally {
     if (ride != null && requested == null) {

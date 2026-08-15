@@ -100,6 +100,31 @@ void main() {
     );
   });
 
+  test('booking timestamps use the same local timezone as ride timestamps', () {
+    final booking = SeatBooking.fromJson({
+      'id': 'booking-timezone',
+      'rideId': 'ride-1',
+      'riderId': 'rider-1',
+      'riderName': 'Maya Chen',
+      'riderInitials': 'MC',
+      'riderPhotoUrl': '',
+      'driverId': 'driver-1',
+      'driverName': 'Jordan T.',
+      'status': 'confirmed',
+      'originName': 'Isla Vista',
+      'destinationName': 'Palo Alto',
+      'departureAt': '2026-08-14T19:50:00.000Z',
+      'paymentExpiresAt': '2026-08-13T19:50:00.000Z',
+    });
+
+    expect(booking.departureAt.isUtc, isFalse);
+    expect(
+      booking.departureAt.toUtc(),
+      DateTime.parse('2026-08-14T19:50:00.000Z'),
+    );
+    expect(booking.paymentExpiresAt?.isUtc, isFalse);
+  });
+
   test('driver payout status requires Stripe payouts to be enabled', () {
     final incomplete = DriverPayoutStatus.fromJson({
       'connected': true,

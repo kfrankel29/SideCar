@@ -270,6 +270,78 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('driver completes a live ride after every rider is picked up', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    final bookings = _M4Repository(bookings: [_booking(status: 'in_progress')]);
+    final plan = _livePlan(phase: LiveTripPhase.dropoffs);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          rideRepositoryProvider.overrideWithValue(_M4RideRepository(plan)),
+          bookingRepositoryProvider.overrideWithValue(bookings),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: LiveTripScreen(
+            ride: _liveRide(),
+            isDriver: true,
+            initialPlan: plan,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ride complete'), findsOneWidget);
+    await tester.tap(find.text('Ride complete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Complete this ride?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Ride complete').last);
+    await tester.pumpAndSettle();
+
+    expect(bookings.completedRideId, 'ride-1');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('completed live ride moves the rider to trip rating', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    final bookings = _M4Repository(bookings: [_booking(status: 'completed')]);
+    final plan = _livePlan(phase: LiveTripPhase.complete);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          rideRepositoryProvider.overrideWithValue(_M4RideRepository(plan)),
+          bookingRepositoryProvider.overrideWithValue(bookings),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: LiveTripScreen(
+            ride: _liveRide(),
+            isDriver: false,
+            initialPlan: plan,
+            riderBooking: _booking(status: 'completed'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rate driver and trip'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('How was Jordan?-5')));
+    await tester.tap(find.byKey(const ValueKey('How was the trip?-4')));
+    await tester.tap(find.text('Submit rating'));
+    await tester.pumpAndSettle();
+
+    expect(bookings.ratedBookingId, 'booking-1');
+    expect(bookings.driverRating, 5);
+    expect(bookings.tripRating, 4);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _M4SafetyRepository implements SafetyRepository {
@@ -294,7 +366,7 @@ class _M4SafetyRepository implements SafetyRepository {
   }) async {}
 }
 
-SeatBooking _booking() => SeatBooking.fromJson({
+SeatBooking _booking({String status = 'confirmed'}) => SeatBooking.fromJson({
   'id': 'booking-1',
   'rideId': 'ride-1',
   'riderId': 'rider-1',
@@ -303,7 +375,7 @@ SeatBooking _booking() => SeatBooking.fromJson({
   'riderPhotoUrl': '',
   'driverId': 'driver-1',
   'driverName': 'Jordan',
-  'status': 'confirmed',
+  'status': status,
   'originName': 'Pardall Rd',
   'destinationName': 'Palo Alto',
   'departureAt': '2026-08-10T22:00:00.000Z',
@@ -333,6 +405,27 @@ class _M4Repository extends UnavailableBookingRepository {
   _M4Repository({this.bookings = const []});
 
   final List<SeatBooking> bookings;
+  String? completedRideId;
+  String? ratedBookingId;
+  int? driverRating;
+  int? tripRating;
+
+  @override
+  Future<void> completeDriverTrip(String rideId) async {
+    completedRideId = rideId;
+  }
+
+  @override
+  Future<void> rateTrip({
+    required String bookingId,
+    required int driverRating,
+    required int tripRating,
+    String comment = '',
+  }) async {
+    ratedBookingId = bookingId;
+    this.driverRating = driverRating;
+    this.tripRating = tripRating;
+  }
 
   @override
   Future<List<SeatBooking>> listMyBookings({bool forceRefresh = false}) async =>
@@ -367,8 +460,12 @@ class _M4Repository extends UnavailableBookingRepository {
 }
 
 class _M4RideRepository implements RideRepository {
+  _M4RideRepository([this.plan]);
+
+  final LiveTripPlan? plan;
+
   @override
-  Future<LiveTripPlan> getLiveTrip(String rideId) async => _livePlan();
+  Future<LiveTripPlan> getLiveTrip(String rideId) async => plan ?? _livePlan();
 
   @override
   Future<LiveTripPlan> startLiveTrip(String rideId) async => _livePlan();
@@ -433,49 +530,50 @@ Ride _liveRide() => Ride.fromJson({
   'pricePerSeatCents': 5000,
 });
 
-LiveTripPlan _livePlan() => LiveTripPlan(
-  phase: LiveTripPhase.pickups,
-  startedAt: DateTime(2026, 8, 10, 15),
-  updatedAt: DateTime(2026, 8, 10, 15),
-  pickupStops: [
-    LiveTripStop(
-      bookingId: 'booking-1',
-      riderId: 'rider-1',
-      riderName: 'Maya Chen',
-      kind: LiveTripStopKind.pickup,
-      order: 0,
-      location: const RideLocation(
-        placeId: 'pickup-1',
-        displayName: 'Pardall Road',
-        formattedAddress: '6551 Trigo Rd, Isla Vista, CA 93117',
-        latitude: 34.4102,
-        longitude: -119.8554,
-      ),
-      eta: DateTime(2026, 8, 10, 15, 15),
-      completedAt: null,
-    ),
-  ],
-  dropoffStops: [
-    LiveTripStop(
-      bookingId: 'booking-1',
-      riderId: 'rider-1',
-      riderName: 'Maya Chen',
-      kind: LiveTripStopKind.dropoff,
-      order: 0,
-      location: const RideLocation(
-        placeId: 'dropoff-1',
-        displayName: 'Palo Alto Caltrain',
-        formattedAddress: '95 University Ave, Palo Alto, CA 94301',
-        latitude: 37.443,
-        longitude: -122.1652,
-      ),
-      eta: DateTime(2026, 8, 10, 20, 15),
-      completedAt: null,
-    ),
-  ],
-  pickupPolyline: 'pickup',
-  dropoffPolyline: 'dropoff',
-);
+LiveTripPlan _livePlan({LiveTripPhase phase = LiveTripPhase.pickups}) =>
+    LiveTripPlan(
+      phase: phase,
+      startedAt: DateTime(2026, 8, 10, 15),
+      updatedAt: DateTime(2026, 8, 10, 15),
+      pickupStops: [
+        LiveTripStop(
+          bookingId: 'booking-1',
+          riderId: 'rider-1',
+          riderName: 'Maya Chen',
+          kind: LiveTripStopKind.pickup,
+          order: 0,
+          location: const RideLocation(
+            placeId: 'pickup-1',
+            displayName: 'Pardall Road',
+            formattedAddress: '6551 Trigo Rd, Isla Vista, CA 93117',
+            latitude: 34.4102,
+            longitude: -119.8554,
+          ),
+          eta: DateTime(2026, 8, 10, 15, 15),
+          completedAt: null,
+        ),
+      ],
+      dropoffStops: [
+        LiveTripStop(
+          bookingId: 'booking-1',
+          riderId: 'rider-1',
+          riderName: 'Maya Chen',
+          kind: LiveTripStopKind.dropoff,
+          order: 0,
+          location: const RideLocation(
+            placeId: 'dropoff-1',
+            displayName: 'Palo Alto Caltrain',
+            formattedAddress: '95 University Ave, Palo Alto, CA 94301',
+            latitude: 37.443,
+            longitude: -122.1652,
+          ),
+          eta: DateTime(2026, 8, 10, 20, 15),
+          completedAt: null,
+        ),
+      ],
+      pickupPolyline: 'pickup',
+      dropoffPolyline: 'dropoff',
+    );
 
 class _M4PublicProfileRepository implements PublicProfileRepository {
   @override

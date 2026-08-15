@@ -186,11 +186,11 @@ class SeatBooking {
     originName: json['originName'] as String? ?? '',
     destinationName: json['destinationName'] as String? ?? '',
     departureAt:
-        DateTime.tryParse(json['departureAt'] as String? ?? '') ??
+        DateTime.tryParse(json['departureAt'] as String? ?? '')?.toLocal() ??
         DateTime.fromMillisecondsSinceEpoch(0),
     paymentExpiresAt: DateTime.tryParse(
       json['paymentExpiresAt'] as String? ?? '',
-    ),
+    )?.toLocal(),
     baseFareCents: (json['baseFareCents'] as num?)?.round() ?? 0,
     serviceFeeCents: (json['serviceFeeCents'] as num?)?.round() ?? 0,
     processingFeeCents: (json['processingFeeCents'] as num?)?.round() ?? 0,

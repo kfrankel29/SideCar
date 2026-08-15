@@ -9,6 +9,7 @@ import 'package:sidecar/src/core/widgets/app_notice.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/bookings/presentation/payment_screens.dart';
+import 'package:sidecar/src/features/bookings/presentation/trip_rating_screen.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
@@ -39,6 +40,7 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
   List<SeatBooking> _bookings = const [];
   bool _loading = true;
   bool _submitting = false;
+  bool _ratingOpened = false;
   Timer? _refreshTimer;
 
   @override
@@ -48,7 +50,7 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
     _plan = widget.initialPlan;
     _refresh(showLoading: _plan == null);
     _refreshTimer = Timer.periodic(
-      const Duration(seconds: 30),
+      const Duration(seconds: 10),
       (_) => _refresh(showLoading: false),
     );
   }
@@ -85,6 +87,7 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
         _bookings = results[1] as List<SeatBooking>;
         _loading = false;
       });
+      _openRatingWhenComplete(_plan!);
     } on AppFailure catch (error) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -146,8 +149,11 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
                 isDriver: widget.isDriver,
                 submitting: _submitting,
                 hasWaitingRiders: _waitingBookings.isNotEmpty,
+                phase: plan.phase,
                 riderBooking: widget.riderBooking,
                 onPickupCode: _showPickupCodeSheet,
+                onCompleteTrip: _completeTrip,
+                onRateTrip: _openRating,
               ),
           ],
         ),
@@ -248,6 +254,71 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
       ),
     );
     controller.dispose();
+  }
+
+  Future<void> _completeTrip() async {
+    if (_submitting) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Complete this ride?'),
+        content: const Text(
+          'This ends the live trip, completes every rider’s booking, and releases eligible payouts.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Not yet'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Ride complete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _submitting = true);
+    try {
+      await ref
+          .read(bookingRepositoryProvider)
+          .completeDriverTrip(widget.ride.id);
+      if (!mounted) return;
+      ref.read(rideRepositoryProvider).invalidateRide(widget.ride.id);
+      showAppNotice(context, 'Ride completed. Riders can now rate the trip.');
+      Navigator.pop(context, true);
+    } on AppFailure catch (error) {
+      if (mounted) {
+        showAppNotice(context, error.message, kind: AppNoticeKind.error);
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _openRatingWhenComplete(LiveTripPlan plan) {
+    if (widget.isDriver ||
+        plan.phase != LiveTripPhase.complete ||
+        _ratingOpened ||
+        widget.riderBooking == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openRating());
+  }
+
+  Future<void> _openRating() async {
+    final booking = widget.riderBooking;
+    if (!mounted || booking == null || _ratingOpened) return;
+    _ratingOpened = true;
+    final rated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => TripRatingScreen(booking: booking)),
+    );
+    if (!mounted) return;
+    if (rated == true) {
+      Navigator.pop(context, true);
+    } else {
+      _ratingOpened = false;
+    }
   }
 }
 
@@ -517,15 +588,21 @@ class _BottomActions extends StatelessWidget {
     required this.isDriver,
     required this.submitting,
     required this.hasWaitingRiders,
+    required this.phase,
     required this.riderBooking,
     required this.onPickupCode,
+    required this.onCompleteTrip,
+    required this.onRateTrip,
   });
 
   final bool isDriver;
   final bool submitting;
   final bool hasWaitingRiders;
+  final LiveTripPhase phase;
   final SeatBooking? riderBooking;
   final VoidCallback onPickupCode;
+  final VoidCallback onCompleteTrip;
+  final VoidCallback onRateTrip;
 
   @override
   Widget build(BuildContext context) {
@@ -538,15 +615,27 @@ class _BottomActions extends StatelessWidget {
       ),
       child: isDriver
           ? FilledButton(
-              onPressed: submitting || !hasWaitingRiders ? null : onPickupCode,
+              onPressed: submitting
+                  ? null
+                  : hasWaitingRiders
+                  ? onPickupCode
+                  : phase != LiveTripPhase.complete
+                  ? onCompleteTrip
+                  : null,
               child: Text(
-                hasWaitingRiders
+                submitting
+                    ? 'Completing…'
+                    : hasWaitingRiders
                     ? 'Enter rider pickup code'
-                    : 'All riders picked up',
+                    : phase != LiveTripPhase.complete
+                    ? 'Ride complete'
+                    : 'Trip complete',
               ),
             )
           : FilledButton(
-              onPressed: riderBooking?.status == BookingStatus.confirmed
+              onPressed: phase == LiveTripPhase.complete
+                  ? onRateTrip
+                  : riderBooking?.status == BookingStatus.confirmed
                   ? () => Navigator.of(context).push<void>(
                       MaterialPageRoute(
                         builder: (_) =>
@@ -555,7 +644,9 @@ class _BottomActions extends StatelessWidget {
                     )
                   : null,
               child: Text(
-                riderBooking?.status == BookingStatus.confirmed
+                phase == LiveTripPhase.complete
+                    ? 'Rate driver and trip'
+                    : riderBooking?.status == BookingStatus.confirmed
                     ? 'View my pickup code'
                     : 'Pickup confirmed',
               ),

@@ -302,12 +302,56 @@ export const getLiveTrip = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
     const rideId = requiredString(object(request.data).rideId, "Ride");
     const ride = await authorizeTripViewer(rideId, request.auth.uid);
-    if (!ride.liveTrip || ride.status !== "in_progress") {
+    if (!ride.liveTrip || !["in_progress", "completed"].includes(String(ride.status))) {
       throw new HttpsError("failed-precondition", "This trip has not started yet.");
     }
     return {liveTrip: publicPlan(ride.liveTrip)};
   },
 );
+
+export async function finishLiveTrip(
+  rideId: string,
+  driverId: string,
+): Promise<Json> {
+  const rideReference = db.collection("rides").doc(rideId);
+  const driverReference = db.collection("users").doc(driverId);
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(rideReference);
+    const ride = snapshot.data();
+    if (!ride || ride.driverId !== driverId) {
+      throw new HttpsError("permission-denied", "You cannot complete this trip.");
+    }
+    if (ride.status === "completed" && ride.liveTrip) {
+      return publicPlan(ride.liveTrip);
+    }
+    if (ride.status !== "in_progress" || !ride.liveTrip) {
+      throw new HttpsError("failed-precondition", "This trip is not active.");
+    }
+    const completedAt = Timestamp.now();
+    const plan = object(ride.liveTrip);
+    const completeStops = (value: unknown) => Array.isArray(value) ?
+      value.map((item) => ({...object(item), completedAt})) : [];
+    const completedPlan: Json = {
+      ...plan,
+      phase: "complete",
+      pickupStops: completeStops(plan.pickupStops),
+      dropoffStops: completeStops(plan.dropoffStops),
+      completedAt,
+      updatedAt: completedAt,
+    };
+    transaction.update(rideReference, {
+      status: "completed",
+      completedAt,
+      liveTrip: completedPlan,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.set(driverReference, {
+      tripCount: FieldValue.increment(1),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    return publicPlan(completedPlan);
+  });
+}
 
 export async function refreshLiveTripAfterPickup(
   rideId: string,

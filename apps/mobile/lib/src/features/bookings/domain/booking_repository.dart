@@ -30,6 +30,13 @@ abstract interface class BookingRepository {
   Future<void> cancelDriverRide(String rideId);
   Future<void> verifyPickupCode(String bookingId, String code);
   Future<void> completeTrip(String bookingId);
+  Future<void> completeDriverTrip(String rideId);
+  Future<void> rateTrip({
+    required String bookingId,
+    required int driverRating,
+    required int tripRating,
+    String comment = '',
+  });
   Future<void> disputeBooking(String bookingId, String reason);
   Future<Uri> createDriverOnboardingLink();
   Future<DriverPayoutStatus> getDriverPayoutStatus();
@@ -53,6 +60,8 @@ class UnavailableBookingRepository implements BookingRepository {
   Future<void> cancelDriverRide(String rideId) async => _notReady();
   @override
   Future<void> completeTrip(String bookingId) async => _notReady();
+  @override
+  Future<void> completeDriverTrip(String rideId) async => _notReady();
   @override
   Future<Uri> createDriverOnboardingLink() async => _notReady();
   @override
@@ -92,6 +101,13 @@ class UnavailableBookingRepository implements BookingRepository {
   @override
   Future<void> verifyPickupCode(String bookingId, String code) async =>
       _notReady();
+  @override
+  Future<void> rateTrip({
+    required String bookingId,
+    required int driverRating,
+    required int tripRating,
+    String comment = '',
+  }) async => _notReady();
 }
 
 final bookingRepositoryProvider = Provider<BookingRepository>(
