@@ -11,6 +11,32 @@ class FirebaseSafetyRepository implements SafetyRepository {
   static const _timeout = Duration(seconds: 20);
 
   @override
+  Future<List<BlockedUser>> listBlockedUsers() async {
+    final data = await _call('listBlockedUsers', const {});
+    final users = data['users'];
+    if (users is! List) return const [];
+    return users
+        .whereType<Map>()
+        .map((item) {
+          final value = Map<String, dynamic>.from(item);
+          return BlockedUser(
+            id: value['id'] as String? ?? '',
+            displayName: value['displayName'] as String? ?? 'SideCar member',
+            initials: value['initials'] as String? ?? '',
+            photoUrl: value['photoUrl'] as String? ?? '',
+            blockedAt: switch (value['blockedAt']) {
+              final num milliseconds => DateTime.fromMillisecondsSinceEpoch(
+                milliseconds.toInt(),
+              ),
+              _ => null,
+            },
+          );
+        })
+        .where((user) => user.id.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  @override
   Future<bool> isBlocked(String targetUserId) async {
     final data = await _call('getBlockStatus', {'targetUserId': targetUserId});
     return data['blocked'] == true;
@@ -69,6 +95,9 @@ class UnavailableSafetyRepository implements SafetyRepository {
     'Safety services are unavailable in this build.',
     code: 'firebase-not-configured',
   );
+
+  @override
+  Future<List<BlockedUser>> listBlockedUsers() async => _notReady();
 
   @override
   Future<bool> isBlocked(String targetUserId) async => _notReady();

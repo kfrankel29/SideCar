@@ -6,6 +6,7 @@ import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
+import 'package:sidecar/src/features/navigation/domain/tab_activation.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/live_trip_screen.dart';
@@ -22,6 +23,7 @@ class RideHomeScreen extends ConsumerStatefulWidget {
 
 class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
   Future<List<Ride>>? _rides;
+  Future<List<SeatBooking>>? _bookings;
   Future<_ActiveRide?>? _activeRide;
   PrimaryRole? _loadedRole;
 
@@ -32,9 +34,14 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
     _rides = role == PrimaryRole.driver
         ? repository.listMyRides(forceRefresh: forceRefresh)
         : repository.listLeavingSoon(forceRefresh: forceRefresh);
+    _bookings = role == PrimaryRole.rider
+        ? ref
+              .read(bookingRepositoryProvider)
+              .listMyBookings(forceRefresh: forceRefresh)
+        : Future.value(const <SeatBooking>[]);
     _activeRide = role == PrimaryRole.driver
         ? _findDriverActiveRide(_rides!)
-        : _findRiderActiveRide(forceRefresh: forceRefresh);
+        : _findRiderActiveRide(_bookings!);
   }
 
   Future<_ActiveRide?> _findDriverActiveRide(Future<List<Ride>> rides) async {
@@ -47,27 +54,30 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
     return null;
   }
 
-  Future<_ActiveRide?> _findRiderActiveRide({
-    required bool forceRefresh,
-  }) async {
-    final bookings = await ref
-        .read(bookingRepositoryProvider)
-        .listMyBookings(forceRefresh: forceRefresh);
+  Future<_ActiveRide?> _findRiderActiveRide(
+    Future<List<SeatBooking>> bookingsFuture,
+  ) async {
+    final bookings = await bookingsFuture;
     final candidates =
         bookings
             .where(
-              (booking) => !const {
-                BookingStatus.pendingDriver,
-                BookingStatus.declined,
-                BookingStatus.acceptedPaymentPending,
-                BookingStatus.paymentProcessing,
-                BookingStatus.expired,
-                BookingStatus.cancelled,
-                BookingStatus.lostSeat,
-                BookingStatus.disputed,
-                BookingStatus.refunded,
-                BookingStatus.cancellationProcessing,
-              }.contains(booking.status),
+              (booking) =>
+                  !const {
+                    BookingStatus.pendingDriver,
+                    BookingStatus.declined,
+                    BookingStatus.acceptedPaymentPending,
+                    BookingStatus.paymentProcessing,
+                    BookingStatus.expired,
+                    BookingStatus.cancelled,
+                    BookingStatus.lostSeat,
+                    BookingStatus.disputed,
+                    BookingStatus.refunded,
+                    BookingStatus.cancellationProcessing,
+                  }.contains(booking.status) &&
+                  (!(booking.status == BookingStatus.completed ||
+                          booking.status == BookingStatus.payoutHeld) ||
+                      (!booking.riderHasRated &&
+                          !booking.ratingPromptDismissed)),
             )
             .toList(growable: false)
           ..sort(
@@ -146,6 +156,14 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(homeTabActivationProvider, (_, _) {
+      if (!mounted) return;
+      setState(() {
+        _rides = null;
+        _bookings = null;
+        _activeRide = null;
+      });
+    });
     final profileState = ref.watch(currentProfileProvider);
     if (profileState.isLoading && !profileState.hasValue) {
       return const RidePageScaffold(
@@ -154,12 +172,16 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
     }
     final profile = profileState.value;
     final role = profile?.primaryRole ?? PrimaryRole.rider;
+    final pendingRequests = role == PrimaryRole.driver
+        ? ref.watch(driverPendingRequestCountProvider).value ?? 0
+        : 0;
     _ensureLoad(role);
     return RidePageScaffold(
       body: RefreshIndicator(
         onRefresh: () async {
           setState(() {
             _rides = null;
+            _bookings = null;
             _activeRide = null;
           });
           _ensureLoad(role, forceRefresh: true);
@@ -197,17 +219,21 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
                 rides: _rides!,
                 activeRide: _activeRide!,
                 profile: profile,
+                pendingRequests: pendingRequests,
                 onRetry: () => setState(() {
                   _rides = null;
+                  _bookings = null;
                   _activeRide = null;
                 }),
               )
             else
               _RiderHome(
                 rides: _rides!,
+                bookings: _bookings!,
                 activeRide: _activeRide!,
                 onRetry: () => setState(() {
                   _rides = null;
+                  _bookings = null;
                   _activeRide = null;
                 }),
               ),
@@ -229,11 +255,13 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
 class _RiderHome extends StatelessWidget {
   const _RiderHome({
     required this.rides,
+    required this.bookings,
     required this.activeRide,
     required this.onRetry,
   });
 
   final Future<List<Ride>> rides;
+  final Future<List<SeatBooking>> bookings;
   final Future<_ActiveRide?> activeRide;
   final VoidCallback onRetry;
 
@@ -263,6 +291,7 @@ class _RiderHome extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         _LiveRideSection(activeRide: activeRide),
+        _UpcomingBookingsSection(bookings: bookings),
         InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: () => context.push(AppRoutes.leavingSoon),
@@ -325,17 +354,105 @@ class _RiderHome extends StatelessWidget {
   }
 }
 
+class _UpcomingBookingsSection extends StatelessWidget {
+  const _UpcomingBookingsSection({required this.bookings});
+
+  final Future<List<SeatBooking>> bookings;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<SeatBooking>>(
+    future: bookings,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState != ConnectionState.done ||
+          snapshot.hasError) {
+        return const SizedBox.shrink();
+      }
+      final now = DateTime.now();
+      final values =
+          (snapshot.data ?? const <SeatBooking>[])
+              .where(
+                (booking) =>
+                    !booking.departureAt.isBefore(now) &&
+                    const {
+                      BookingStatus.acceptedPaymentPending,
+                      BookingStatus.paymentProcessing,
+                      BookingStatus.confirmed,
+                    }.contains(booking.status),
+              )
+              .toList(growable: false)
+            ..sort(
+              (left, right) => left.departureAt.compareTo(right.departureAt),
+            );
+      if (values.isEmpty) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              values.length == 1 ? 'Upcoming trip' : 'Upcoming trips',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 12),
+            for (final booking in values.take(2)) ...[
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => context.push('/rides/${booking.rideId}'),
+                child: Container(
+                  padding: const EdgeInsets.all(15),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${booking.originName} → ${booking.destinationName}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _bookingDate(booking.departureAt),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ],
+        ),
+      );
+    },
+  );
+
+  static String _bookingDate(DateTime value) {
+    final local = value.toLocal();
+    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final suffix = local.hour >= 12 ? 'PM' : 'AM';
+    return '${local.month}/${local.day} · $hour:$minute $suffix';
+  }
+}
+
 class _DriverHome extends StatelessWidget {
   const _DriverHome({
     required this.rides,
     required this.activeRide,
     required this.profile,
+    required this.pendingRequests,
     required this.onRetry,
   });
 
   final Future<List<Ride>> rides;
   final Future<_ActiveRide?> activeRide;
   final UserProfile? profile;
+  final int pendingRequests;
   final VoidCallback onRetry;
 
   @override
@@ -396,9 +513,30 @@ class _DriverHome extends StatelessWidget {
         ),
         const SizedBox(height: 26),
         _LiveRideSection(activeRide: activeRide),
-        Text(
-          'Your upcoming rides',
-          style: Theme.of(context).textTheme.titleLarge,
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Your upcoming rides',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+            if (pendingRequests > 0) ...[
+              const SizedBox(width: 8),
+              Semantics(
+                label: '$pendingRequests new seat requests',
+                child: const DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Color(0xFFE14942),
+                    shape: BoxShape.circle,
+                  ),
+                  child: SizedBox(width: 9, height: 9),
+                ),
+              ),
+            ],
+          ],
         ),
         const SizedBox(height: 14),
         FutureBuilder<List<Ride>>(

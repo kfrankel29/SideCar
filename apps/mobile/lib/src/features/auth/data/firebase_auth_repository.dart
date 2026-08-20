@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/features/auth/data/auth_error_mapper.dart';
@@ -9,10 +10,15 @@ import 'package:sidecar/src/features/auth/domain/account_user.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 
 class FirebaseAuthRepository implements AuthRepository {
-  FirebaseAuthRepository(this._auth, this._functions);
+  FirebaseAuthRepository(
+    this._auth,
+    this._functions, {
+    FirebaseMessaging? messaging,
+  }) : _messaging = messaging;
 
   final FirebaseAuth _auth;
   final FirebaseFunctions _functions;
+  final FirebaseMessaging? _messaging;
   Future<void>? _googleInitialization;
 
   static const _googleClientId = String.fromEnvironment(
@@ -117,7 +123,9 @@ class FirebaseAuthRepository implements AuthRepository {
         email: email.trim().toLowerCase(),
         password: password,
       );
-      return _requireUser(credential.user);
+      final user = credential.user;
+      await user?.getIdToken(true);
+      return _requireUser(user);
     } on Object catch (error) {
       throw _mapFailure(error);
     }
@@ -133,6 +141,7 @@ class FirebaseAuthRepository implements AuthRepository {
         idToken: googleAuth.idToken,
       );
       final result = await _auth.signInWithCredential(credential);
+      await result.user?.getIdToken(true);
       try {
         await _functions.httpsCallable('completeGoogleStudentSignIn').call();
       } on Object {
@@ -229,7 +238,21 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<void> signOut() => _auth.signOut();
+  Future<void> signOut() async {
+    try {
+      final token = await _messaging?.getToken();
+      if (token != null && token.isNotEmpty && _auth.currentUser != null) {
+        await _functions
+            .httpsCallable('unregisterPushToken')
+            .call<void>({'token': token})
+            .timeout(const Duration(seconds: 3));
+      }
+    } on Object {
+      // Signing out must still succeed when notification cleanup is offline.
+    } finally {
+      await _auth.signOut();
+    }
+  }
 
   AccountUser _requireUser(User? user) {
     final mapped = _mapUser(user);

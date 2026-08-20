@@ -2,7 +2,7 @@
   "conditions": [],
   "parameters": {
     "config_version": {
-      "defaultValue": {"value": "m4-bookings-payments"},
+      "defaultValue": {"value": "m5-messaging-notifications"},
       "description": "Visible version marker used for acceptance testing.",
       "valueType": "STRING"
     },
@@ -17,6 +17,11 @@
       },
       "description": "JSON array of exact non-school email addresses allowed for controlled testing.",
       "valueType": "JSON"
+    },
+    "auth_email_sender": {
+      "defaultValue": {"value": "SideCar <verify@ride-sidecar.com>"},
+      "description": "Verified sender used for SideCar email verification and password reset codes.",
+      "valueType": "STRING"
     },
     "service_fee_type": {
       "defaultValue": {"value": "percentage"},

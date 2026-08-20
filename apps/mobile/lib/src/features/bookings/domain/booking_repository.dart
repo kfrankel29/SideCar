@@ -37,6 +37,12 @@ abstract interface class BookingRepository {
     required int tripRating,
     String comment = '',
   });
+  Future<void> dismissTripRating(String bookingId);
+  Future<void> rateRider({
+    required String bookingId,
+    required int rating,
+    String comment = '',
+  });
   Future<void> disputeBooking(String bookingId, String reason);
   Future<Uri> createDriverOnboardingLink();
   Future<DriverPayoutStatus> getDriverPayoutStatus();
@@ -67,6 +73,8 @@ class UnavailableBookingRepository implements BookingRepository {
   @override
   Future<void> disputeBooking(String bookingId, String reason) async =>
       _notReady();
+  @override
+  Future<void> dismissTripRating(String bookingId) async => _notReady();
   @override
   Future<DriverPayoutStatus> getDriverPayoutStatus() async => _notReady();
   @override
@@ -108,8 +116,29 @@ class UnavailableBookingRepository implements BookingRepository {
     required int tripRating,
     String comment = '',
   }) async => _notReady();
+  @override
+  Future<void> rateRider({
+    required String bookingId,
+    required int rating,
+    String comment = '',
+  }) async => _notReady();
 }
 
 final bookingRepositoryProvider = Provider<BookingRepository>(
   (ref) => const UnavailableBookingRepository(),
 );
+
+final driverPendingRequestCountProvider = FutureProvider.autoDispose<int>((
+  ref,
+) async {
+  try {
+    final bookings = await ref
+        .read(bookingRepositoryProvider)
+        .listRideRequests(forceRefresh: true);
+    return bookings
+        .where((booking) => booking.status == BookingStatus.pendingDriver)
+        .length;
+  } on Object {
+    return 0;
+  }
+});

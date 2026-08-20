@@ -42,4 +42,26 @@ void main() {
       AppRoutes.opening,
     );
   });
+
+  test('opens the Messages tab from the app URL scheme', () {
+    expect(
+      sideCarDeepLinkDestination(Uri.parse('sidecar://messages/')),
+      AppRoutes.messages,
+    );
+  });
+
+  test('opens Home from supported app URL variants', () {
+    expect(
+      sideCarDeepLinkDestination(Uri.parse('sidecar://home/')),
+      AppRoutes.home,
+    );
+    expect(
+      sideCarDeepLinkDestination(Uri.parse('sidecar://app/home')),
+      AppRoutes.home,
+    );
+  });
+
+  test('leaves unknown app links for the recovery screen', () {
+    expect(sideCarDeepLinkDestination(Uri.parse('sidecar://unknown/')), isNull);
+  });
 }

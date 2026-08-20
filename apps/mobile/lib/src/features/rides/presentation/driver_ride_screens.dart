@@ -615,6 +615,8 @@ class _MyRidesScreenState extends ConsumerState<MyRidesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final hasPendingRequests =
+        (ref.watch(driverPendingRequestCountProvider).value ?? 0) > 0;
     ref.listen(myRidesTabActivationProvider, (_, _) {
       if (mounted) setState(() => _load(forceRefresh: true));
     });
@@ -658,6 +660,7 @@ class _MyRidesScreenState extends ConsumerState<MyRidesScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: _RideTabs(
               selectedIndex: _selectedTab,
+              showRequestBadge: hasPendingRequests,
               onSelected: (index) => setState(() => _selectedTab = index),
             ),
           ),
@@ -804,6 +807,7 @@ class _DriverRequestsListState extends ConsumerState<_DriverRequestsList> {
           .read(bookingRepositoryProvider)
           .respondToRequest(booking.id, accept: accept);
       if (mounted) {
+        ref.invalidate(driverPendingRequestCountProvider);
         showAppNotice(
           context,
           accept ? 'Seat request accepted.' : 'Seat request declined.',
@@ -1173,10 +1177,15 @@ String _bookingStatusLabel(BookingStatus status) => switch (status) {
 };
 
 class _RideTabs extends StatelessWidget {
-  const _RideTabs({required this.selectedIndex, required this.onSelected});
+  const _RideTabs({
+    required this.selectedIndex,
+    required this.onSelected,
+    this.showRequestBadge = false,
+  });
 
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+  final bool showRequestBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -1198,6 +1207,7 @@ class _RideTabs extends StatelessWidget {
               child: _RideListTab(
                 label: entry.$2,
                 selected: selectedIndex == entry.$1,
+                showBadge: entry.$1 == 1 && showRequestBadge,
                 onTap: () => onSelected(entry.$1),
               ),
             ),
@@ -1243,11 +1253,13 @@ class _RideListTab extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.showBadge = false,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final bool showBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -1261,10 +1273,29 @@ class _RideListTab extends StatelessWidget {
           color: selected ? AppColors.ink : Colors.transparent,
           borderRadius: BorderRadius.circular(99),
         ),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: selected ? Colors.white : AppColors.mutedInk,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: selected ? Colors.white : AppColors.mutedInk,
+                ),
+              ),
+              if (showBadge) ...[
+                const SizedBox(width: 6),
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE14942),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),

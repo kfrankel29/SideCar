@@ -444,6 +444,9 @@ class _AlreadyVerifiedVerificationRepository extends _VerificationRepository {
 }
 
 class _SafetyRepository implements SafetyRepository {
+  @override
+  Future<List<BlockedUser>> listBlockedUsers() async => const [];
+
   const _SafetyRepository();
 
   @override

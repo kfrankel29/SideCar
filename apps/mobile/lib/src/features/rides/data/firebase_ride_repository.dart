@@ -42,6 +42,32 @@ class FirebaseRideRepository implements RideRepository {
   }
 
   @override
+  Future<RideStopPickerContext> getRideStopPickerContext(
+    String rideId, {
+    String selectedPlaceId = '',
+  }) async {
+    final data = await _call('getRideStopPickerContext', {
+      'rideId': rideId,
+      if (selectedPlaceId.isNotEmpty) 'selectedPlaceId': selectedPlaceId,
+    });
+    return RideStopPickerContext.fromJson(data);
+  }
+
+  @override
+  Future<RidePlacePrediction> resolveRideStopPin(
+    String rideId, {
+    required double latitude,
+    required double longitude,
+  }) async {
+    final data = await _call('resolveRideStopPin', {
+      'rideId': rideId,
+      'latitude': latitude,
+      'longitude': longitude,
+    });
+    return RidePlacePrediction.fromJson(_map(data['place']));
+  }
+
+  @override
   Future<Ride> createRide(RideDraft draft) async {
     final data = await _call('createRide', draft.toJson());
     final ride = Ride.fromJson(_map(data['ride']));
@@ -183,6 +209,19 @@ class UnavailableRideRepository implements RideRepository {
 
   @override
   Future<Ride> getRide(String rideId) async => _notReady();
+
+  @override
+  Future<RideStopPickerContext> getRideStopPickerContext(
+    String rideId, {
+    String selectedPlaceId = '',
+  }) async => _notReady();
+
+  @override
+  Future<RidePlacePrediction> resolveRideStopPin(
+    String rideId, {
+    required double latitude,
+    required double longitude,
+  }) async => _notReady();
 
   @override
   Future<LiveTripPlan> startLiveTrip(String rideId) async => _notReady();

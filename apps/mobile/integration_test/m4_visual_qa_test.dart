@@ -356,6 +356,9 @@ void main() {
 
 class _M4SafetyRepository implements SafetyRepository {
   @override
+  Future<List<BlockedUser>> listBlockedUsers() async => const [];
+
+  @override
   Future<bool> isBlocked(String targetUserId) async => false;
 
   @override
@@ -697,6 +700,19 @@ class _M4RideRepository implements RideRepository {
     if (match.isNotEmpty) return match.first;
     return _publishedRide();
   }
+
+  @override
+  Future<RideStopPickerContext> getRideStopPickerContext(
+    String rideId, {
+    String selectedPlaceId = '',
+  }) async => _unused();
+
+  @override
+  Future<RidePlacePrediction> resolveRideStopPin(
+    String rideId, {
+    required double latitude,
+    required double longitude,
+  }) async => _unused();
 
   @override
   Future<LiveTripPlan> getLiveTrip(String rideId) async => _unused();

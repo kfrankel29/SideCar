@@ -3,6 +3,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
@@ -14,6 +15,10 @@ import 'package:sidecar/src/features/auth/data/firebase_auth_repository.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/data/firebase_booking_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
+import 'package:sidecar/src/features/messaging/data/firebase_messaging_repository.dart';
+import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart';
+import 'package:sidecar/src/features/notifications/data/firebase_notification_service.dart';
+import 'package:sidecar/src/features/notifications/domain/notification_service.dart';
 import 'package:sidecar/src/features/profile/data/firebase_profile_repository.dart';
 import 'package:sidecar/src/features/profile/data/firebase_public_profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
@@ -34,6 +39,8 @@ class AppBootstrapResult {
     required this.publicProfileRepository,
     required this.rideRepository,
     required this.bookingRepository,
+    required this.messagingRepository,
+    required this.notificationService,
     required this.verificationRepository,
     required this.safetyRepository,
     this.initializationError,
@@ -46,6 +53,8 @@ class AppBootstrapResult {
   final PublicProfileRepository publicProfileRepository;
   final RideRepository rideRepository;
   final BookingRepository bookingRepository;
+  final MessagingRepository messagingRepository;
+  final NotificationService notificationService;
   final VerificationRepository verificationRepository;
   final SafetyRepository safetyRepository;
   final Object? initializationError;
@@ -91,7 +100,11 @@ class AppBootstrap {
         businessConfigRepository: FirebaseBusinessConfigRepository(
           FirebaseRemoteConfig.instance,
         ),
-        authRepository: FirebaseAuthRepository(auth, functions),
+        authRepository: FirebaseAuthRepository(
+          auth,
+          functions,
+          messaging: FirebaseMessaging.instance,
+        ),
         profileRepository: FirebaseProfileRepository(
           auth,
           FirebaseFirestore.instance,
@@ -106,6 +119,16 @@ class AppBootstrap {
         ),
         rideRepository: FirebaseRideRepository(functions),
         bookingRepository: FirebaseBookingRepository(functions),
+        messagingRepository: FirebaseMessagingRepository(
+          auth,
+          FirebaseFirestore.instance,
+          functions,
+        ),
+        notificationService: FirebaseNotificationService(
+          auth,
+          FirebaseMessaging.instance,
+          functions,
+        ),
         safetyRepository: FirebaseSafetyRepository(functions),
         initializationError: appCheckError,
       );
@@ -121,6 +144,8 @@ class AppBootstrap {
         publicProfileRepository: const UnavailablePublicProfileRepository(),
         rideRepository: const UnavailableRideRepository(),
         bookingRepository: const UnavailableBookingRepository(),
+        messagingRepository: const UnavailableMessagingRepository(),
+        notificationService: const UnavailableNotificationService(),
         verificationRepository: const UnavailableVerificationRepository(),
         safetyRepository: const UnavailableSafetyRepository(),
       );

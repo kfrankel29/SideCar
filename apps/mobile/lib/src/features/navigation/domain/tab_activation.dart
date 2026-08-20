@@ -17,3 +17,7 @@ final mainTabActivationProvider =
 final myRidesTabActivationProvider = Provider<int>(
   (ref) => ref.watch(mainTabActivationProvider)[2] ?? 0,
 );
+
+final homeTabActivationProvider = Provider<int>(
+  (ref) => ref.watch(mainTabActivationProvider)[0] ?? 0,
+);

@@ -213,6 +213,26 @@ class FirebaseBookingRepository implements BookingRepository {
   }
 
   @override
+  Future<void> dismissTripRating(String bookingId) async {
+    await _call('dismissTripRating', {'bookingId': bookingId});
+    _clear();
+  }
+
+  @override
+  Future<void> rateRider({
+    required String bookingId,
+    required int rating,
+    String comment = '',
+  }) async {
+    await _call('submitRiderRating', {
+      'bookingId': bookingId,
+      'rating': rating,
+      'comment': comment.trim(),
+    });
+    _clear();
+  }
+
+  @override
   Future<void> disputeBooking(String bookingId, String reason) async {
     await _call('disputeBooking', {'bookingId': bookingId, 'reason': reason});
     _clear();

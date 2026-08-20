@@ -4,6 +4,7 @@ import {
   compactEncodedPolyline,
   googleStaticMapUrl,
   rideMapPreviewUrl,
+  rideStopMapPreviewUrl,
 } from "./ride_map_preview.js";
 
 test("builds a cached public map-preview URL without a credential", () => {
@@ -76,4 +77,44 @@ test("extends the map north without changing the original route scale", () => {
   assert.ok(latitude > 35);
   assert.equal(longitude, -121);
   assert.equal(url.searchParams.get("size"), "640x352");
+});
+
+test("builds a credential-free stop picker preview with selected and gas pins", () => {
+  const value = rideStopMapPreviewUrl({
+    rideId: "ride-1",
+    encodedPolyline: "encoded-route",
+    selectedStop: {latitude: 34.4123456, longitude: -119.8123456},
+    gasStations: [
+      {latitude: 34.4, longitude: -119.8},
+      {latitude: 34.5, longitude: -119.9},
+    ],
+  });
+  const url = new URL(value);
+
+  assert.equal(url.origin, "https://sidecar-fb0e7.web.app");
+  assert.equal(url.searchParams.get("pin"), "34.412346,-119.812346");
+  assert.equal(
+    url.searchParams.get("gas"),
+    "34.400000,-119.800000;34.500000,-119.900000",
+  );
+  assert.equal(value.includes("key="), false);
+});
+
+test("renders selected and gas station markers after the route endpoints", () => {
+  const value = googleStaticMapUrl({
+    apiKey: "server-secret",
+    encodedPolyline: "encoded-route",
+    origin: {latitude: 34.4, longitude: -119.8},
+    destination: {latitude: 37.6, longitude: -122.4},
+    selectedStop: {latitude: 35.1, longitude: -120.2},
+    gasStations: [
+      {latitude: 34.8, longitude: -120.1},
+      {latitude: 35.4, longitude: -120.6},
+    ],
+  });
+  const markers = new URL(value).searchParams.getAll("markers");
+
+  assert.equal(markers.length, 4);
+  assert.match(markers[2] ?? "", /34\.8,-120\.1\|35\.4,-120\.6$/);
+  assert.match(markers[3] ?? "", /35\.1,-120\.2$/);
 });

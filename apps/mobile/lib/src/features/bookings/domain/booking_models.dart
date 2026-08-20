@@ -170,6 +170,9 @@ class SeatBooking {
     this.paymentExpiresAt,
     this.pickupCode,
     this.disputeReason,
+    this.ratedAt,
+    this.ratingSkippedAt,
+    this.riderRatedAt,
   });
 
   factory SeatBooking.fromJson(Map<String, dynamic> json) => SeatBooking(
@@ -203,6 +206,13 @@ class SeatBooking {
     driverPayoutCents: (json['driverPayoutCents'] as num?)?.round() ?? 0,
     pickupCode: json['pickupCode'] as String?,
     disputeReason: json['disputeReason'] as String?,
+    ratedAt: DateTime.tryParse(json['ratedAt'] as String? ?? '')?.toLocal(),
+    ratingSkippedAt: DateTime.tryParse(
+      json['ratingSkippedAt'] as String? ?? '',
+    )?.toLocal(),
+    riderRatedAt: DateTime.tryParse(
+      json['riderRatedAt'] as String? ?? '',
+    )?.toLocal(),
   );
 
   final String id;
@@ -231,6 +241,13 @@ class SeatBooking {
   final int driverPayoutCents;
   final String? pickupCode;
   final String? disputeReason;
+  final DateTime? ratedAt;
+  final DateTime? ratingSkippedAt;
+  final DateTime? riderRatedAt;
+
+  bool get driverHasRated => riderRatedAt != null;
+  bool get riderHasRated => ratedAt != null;
+  bool get ratingPromptDismissed => ratingSkippedAt != null;
 
   String get totalLabel => '\$${(totalCents / 100).toStringAsFixed(2)}';
 

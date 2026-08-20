@@ -5,11 +5,13 @@ import 'package:sidecar/src/core/platform/app_haptics.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/profile/presentation/account_profile_screen.dart';
+import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/navigation/domain/tab_activation.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
+import 'package:sidecar/src/features/messaging/presentation/messaging_screens.dart';
+import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/driver_ride_screens.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_search_screens.dart';
-import 'package:sidecar/src/theme/app_theme.dart';
 
 class MainTabShell extends ConsumerWidget {
   const MainTabShell({required this.navigationShell, super.key});
@@ -18,17 +20,33 @@ class MainTabShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final role = ref.watch(currentProfileProvider).value?.primaryRole;
+    final profile = ref.watch(currentProfileProvider).value;
+    final role = profile?.primaryRole;
     if (role == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    final uid = profile?.userId ?? '';
+    final unreadMessages =
+        ref
+            .watch(conversationsProvider)
+            .value
+            ?.fold<int>(0, (total, item) => total + item.unreadCount(uid)) ??
+        0;
+    final pendingRequests = role == PrimaryRole.driver
+        ? ref.watch(driverPendingRequestCountProvider).value ?? 0
+        : 0;
     return Scaffold(
       body: navigationShell,
       bottomNavigationBar: MainBottomNavigation(
         role: role,
+        unreadMessages: unreadMessages,
+        pendingRequests: pendingRequests,
         selectedIndex: navigationShell.currentIndex,
         onSelected: (index) {
           AppHaptics.tap();
+          if (role == PrimaryRole.driver && index == 2) {
+            ref.invalidate(driverPendingRequestCountProvider);
+          }
           ref.read(mainTabActivationProvider.notifier).activate(index);
           navigationShell.goBranch(
             index,
@@ -45,12 +63,16 @@ class MainBottomNavigation extends StatelessWidget {
     required this.role,
     required this.selectedIndex,
     required this.onSelected,
+    this.unreadMessages = 0,
+    this.pendingRequests = 0,
     super.key,
   });
 
   final PrimaryRole role;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+  final int unreadMessages;
+  final int pendingRequests;
 
   @override
   Widget build(BuildContext context) {
@@ -94,9 +116,45 @@ class MainBottomNavigation extends StatelessWidget {
                     onTap: () => onSelected(index),
                     radius: 28,
                     child: Center(
-                      child: FinalDraftIcon(
-                        kind: icons[index],
-                        selected: selected,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          FinalDraftIcon(
+                            kind: icons[index],
+                            selected: selected,
+                          ),
+                          if (index == 3 && unreadMessages > 0)
+                            Positioned(
+                              right: -8,
+                              top: -7,
+                              child: Container(
+                                constraints: const BoxConstraints(minWidth: 17),
+                                height: 17,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                alignment: Alignment.center,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFE14942),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Text(
+                                  unreadMessages > 9 ? '9+' : '$unreadMessages',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (index == 2 && pendingRequests > 0)
+                            const Positioned(
+                              right: -6,
+                              top: -5,
+                              child: _NavigationAttentionDot(),
+                            ),
+                        ],
                       ),
                     ),
                   ),
@@ -108,6 +166,20 @@ class MainBottomNavigation extends StatelessWidget {
       ),
     );
   }
+}
+
+class _NavigationAttentionDot extends StatelessWidget {
+  const _NavigationAttentionDot();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 8,
+    height: 8,
+    decoration: const BoxDecoration(
+      color: Color(0xFFE14942),
+      shape: BoxShape.circle,
+    ),
+  );
 }
 
 class RoleActionTab extends ConsumerWidget {
@@ -138,64 +210,7 @@ class MessagesTabScreen extends StatelessWidget {
   const MessagesTabScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return _RefreshableEmptyTabScreen(
-      title: 'Messages',
-      icon: Icons.chat_bubble_outline_rounded,
-      message: 'Ride conversations will appear here.',
-    );
-  }
-}
-
-class _RefreshableEmptyTabScreen extends StatelessWidget {
-  const _RefreshableEmptyTabScreen({
-    required this.title,
-    required this.icon,
-    required this.message,
-  });
-
-  final String title;
-  final IconData icon;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: RefreshIndicator(
-        onRefresh: () =>
-            Future<void>.delayed(const Duration(milliseconds: 150)),
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
-              sliver: SliverFillRemaining(
-                hasScrollBody: false,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.headlineLarge,
-                    ),
-                    const Spacer(),
-                    Icon(icon, size: 42, color: AppColors.mutedInk),
-                    const SizedBox(height: 14),
-                    Text(
-                      message,
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const Spacer(),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const MessageInboxScreen();
 }
 
 class AccountTab extends StatelessWidget {

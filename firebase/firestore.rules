@@ -81,6 +81,25 @@ service cloud.firestore {
         allow read: if owns(uid);
         allow write: if false;
       }
+
+      match /devices/{deviceId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.participantIds;
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if signedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        allow write: if false;
+      }
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if false;
     }
 
     match /safetyReports/{reportId} {

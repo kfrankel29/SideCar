@@ -9,6 +9,8 @@ import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/bookings/presentation/payment_screens.dart';
+import 'package:sidecar/src/features/bookings/presentation/trip_rating_screen.dart';
+import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/place_picker_sheet.dart';
@@ -63,6 +65,7 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
             BookingStatus.confirmed,
             BookingStatus.inProgress,
             BookingStatus.completed,
+            BookingStatus.payoutHeld,
           }.contains(booking.status)) {
         return _RideDetailsPayload(ride: ride, booking: booking);
       }
@@ -390,28 +393,12 @@ class _RideDetails extends StatelessWidget {
               ),
               SizedBox(
                 width: 180,
-                child: booking == null
-                    ? FilledButton(
-                        onPressed: requesting || ride.seatsAvailable < 1
-                            ? null
-                            : AppHaptics.wrap(onRequest),
-                        child: Text(requesting ? 'Sending…' : 'Request seat'),
-                      )
-                    : FilledButton(
-                        onPressed: booking!.status == BookingStatus.confirmed
-                            ? () => Navigator.of(context).push<void>(
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      PickupCodeScreen(booking: booking!),
-                                ),
-                              )
-                            : null,
-                        child: Text(
-                          booking!.status == BookingStatus.confirmed
-                              ? 'View pickup code'
-                              : _bookedTripStatus(booking!),
-                        ),
-                      ),
+                child: _RiderRideAction(
+                  ride: ride,
+                  booking: booking,
+                  requesting: requesting,
+                  onRequest: onRequest,
+                ),
               ),
             ],
           ),
@@ -424,14 +411,67 @@ class _RideDetails extends StatelessWidget {
 String _bookedTripTitle(SeatBooking booking) => switch (booking.status) {
   BookingStatus.inProgress => 'Trip in progress',
   BookingStatus.completed => 'Trip complete',
+  BookingStatus.payoutHeld => 'Trip complete',
   _ => 'Your ride',
 };
 
 String _bookedTripStatus(SeatBooking booking) => switch (booking.status) {
   BookingStatus.inProgress => 'In progress',
   BookingStatus.completed => 'Completed',
+  BookingStatus.payoutHeld => 'Completed',
   _ => 'Confirmed',
 };
+
+class _RiderRideAction extends StatelessWidget {
+  const _RiderRideAction({
+    required this.ride,
+    required this.booking,
+    required this.requesting,
+    required this.onRequest,
+  });
+
+  final Ride ride;
+  final SeatBooking? booking;
+  final bool requesting;
+  final VoidCallback onRequest;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = booking;
+    if (current == null) {
+      return FilledButton(
+        onPressed: requesting || ride.seatsAvailable < 1
+            ? null
+            : AppHaptics.wrap(onRequest),
+        child: Text(requesting ? 'Sending…' : 'Request seat'),
+      );
+    }
+    if (current.status == BookingStatus.confirmed) {
+      return FilledButton(
+        onPressed: () => Navigator.of(context).push<void>(
+          MaterialPageRoute(builder: (_) => PickupCodeScreen(booking: current)),
+        ),
+        child: const Text('View pickup code'),
+      );
+    }
+    if ({
+          BookingStatus.completed,
+          BookingStatus.payoutHeld,
+        }.contains(current.status) &&
+        !current.riderHasRated) {
+      return FilledButton(
+        onPressed: () => Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => TripRatingScreen(booking: current)),
+        ),
+        child: const Text('Rate trip'),
+      );
+    }
+    return FilledButton(
+      onPressed: null,
+      child: Text(_bookedTripStatus(current)),
+    );
+  }
+}
 
 class _BookedTripDetails extends StatelessWidget {
   const _BookedTripDetails({required this.booking});
@@ -484,6 +524,7 @@ class _OwnerRideDetailsPage extends ConsumerStatefulWidget {
 class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
   late Future<List<SeatBooking>> _bookings;
   bool _startingTrip = false;
+  bool _openingRatings = false;
 
   @override
   void initState() {
@@ -709,12 +750,32 @@ class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
                 FutureBuilder<List<SeatBooking>>(
                   future: _bookings,
                   builder: (context, snapshot) {
+                    final completed = (snapshot.data ?? const <SeatBooking>[])
+                        .where(
+                          (booking) =>
+                              {
+                                BookingStatus.completed,
+                                BookingStatus.payoutHeld,
+                              }.contains(booking.status) &&
+                              !booking.driverHasRated,
+                        )
+                        .toList(growable: false);
                     final confirmed = (snapshot.data ?? const <SeatBooking>[])
                         .where(
                           (booking) =>
                               booking.status == BookingStatus.confirmed,
                         )
                         .toList();
+                    if (completed.isNotEmpty) {
+                      return FilledButton(
+                        onPressed: _openingRatings
+                            ? null
+                            : () => _rateRiders(completed),
+                        child: Text(
+                          _openingRatings ? 'Opening…' : 'Rate riders',
+                        ),
+                      );
+                    }
                     return FilledButton(
                       onPressed: confirmed.isEmpty || _startingTrip
                           ? null
@@ -758,6 +819,20 @@ class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
       if (mounted) setState(() => _startingTrip = false);
     }
   }
+
+  Future<void> _rateRiders(List<SeatBooking> bookings) async {
+    if (_openingRatings) return;
+    setState(() => _openingRatings = true);
+    try {
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => RateRidersScreen(bookings: bookings)),
+      );
+      if (!mounted) return;
+      setState(_reloadBookings);
+    } finally {
+      if (mounted) setState(() => _openingRatings = false);
+    }
+  }
 }
 
 class _DashedRoundedBorderPainter extends CustomPainter {
@@ -793,13 +868,13 @@ class _DashedRoundedBorderPainter extends CustomPainter {
       oldDelegate.color != color || oldDelegate.radius != radius;
 }
 
-class _OwnerRiderRow extends StatelessWidget {
+class _OwnerRiderRow extends ConsumerWidget {
   const _OwnerRiderRow({required this.booking});
 
   final SeatBooking booking;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return InkWell(
       onTap: () => context.push('/profiles/${booking.riderId}'),
       borderRadius: BorderRadius.circular(10),
@@ -849,7 +924,24 @@ class _OwnerRiderRow extends StatelessWidget {
             ),
             IconButton(
               tooltip: 'Message rider',
-              onPressed: () {},
+              onPressed: () async {
+                try {
+                  final conversation = await ref
+                      .read(messagingRepositoryProvider)
+                      .openBookingConversation(booking.id);
+                  if (context.mounted) {
+                    context.push(
+                      '/messages/${Uri.encodeComponent(conversation.id)}',
+                    );
+                  }
+                } on AppFailure catch (error) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text(error.message)));
+                  }
+                }
+              },
               icon: const Icon(Icons.chat_bubble_outline, size: 20),
             ),
           ],
@@ -1032,6 +1124,7 @@ class _SeatRequestSheetState extends State<_SeatRequestSheet> {
     final place = await showRidePlacePicker(
       context,
       title: 'Exact pickup address',
+      rideId: widget.ride.id,
       initialQuery: _pickup?.displayName ?? widget.ride.origin.displayName,
     );
     if (place != null && mounted) setState(() => _pickup = place);
@@ -1041,6 +1134,7 @@ class _SeatRequestSheetState extends State<_SeatRequestSheet> {
     final place = await showRidePlacePicker(
       context,
       title: 'Exact drop-off address',
+      rideId: widget.ride.id,
       initialQuery:
           _dropoff?.displayName ?? widget.ride.destination.displayName,
     );

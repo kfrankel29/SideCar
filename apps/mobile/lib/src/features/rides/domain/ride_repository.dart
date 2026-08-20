@@ -3,6 +3,15 @@ import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 
 abstract interface class RideRepository {
   Future<List<RidePlacePrediction>> searchPlaces(String query);
+  Future<RideStopPickerContext> getRideStopPickerContext(
+    String rideId, {
+    String selectedPlaceId = '',
+  });
+  Future<RidePlacePrediction> resolveRideStopPin(
+    String rideId, {
+    required double latitude,
+    required double longitude,
+  });
   Future<Ride> createRide(RideDraft draft);
   Future<Ride> updateRide(RideUpdate update);
   Future<void> cancelRide(String rideId);

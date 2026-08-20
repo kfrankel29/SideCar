@@ -286,6 +286,26 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
       if (!mounted) return;
       ref.read(rideRepositoryProvider).invalidateRide(widget.ride.id);
       showAppNotice(context, 'Ride completed. Riders can now rate the trip.');
+      final refreshed = await ref
+          .read(bookingRepositoryProvider)
+          .listRideRequests(rideId: widget.ride.id, forceRefresh: true);
+      if (!mounted) return;
+      final riders = refreshed
+          .where(
+            (booking) =>
+                {
+                  BookingStatus.payoutHeld,
+                  BookingStatus.completed,
+                }.contains(booking.status) &&
+                !booking.driverHasRated,
+          )
+          .toList(growable: false);
+      if (riders.isNotEmpty) {
+        await Navigator.of(context).push<bool>(
+          MaterialPageRoute(builder: (_) => RateRidersScreen(bookings: riders)),
+        );
+      }
+      if (!mounted) return;
       Navigator.pop(context, true);
     } on AppFailure catch (error) {
       if (mounted) {

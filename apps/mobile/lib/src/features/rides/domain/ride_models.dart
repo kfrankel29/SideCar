@@ -59,12 +59,16 @@ class RidePlacePrediction {
     required this.displayName,
     required this.mainText,
     required this.secondaryText,
+    this.latitude = 0,
+    this.longitude = 0,
   });
 
   final String placeId;
   final String displayName;
   final String mainText;
   final String secondaryText;
+  final double latitude;
+  final double longitude;
 
   factory RidePlacePrediction.fromJson(Map<String, dynamic> json) {
     return RidePlacePrediction(
@@ -72,6 +76,45 @@ class RidePlacePrediction {
       displayName: json['displayName'] as String? ?? '',
       mainText: json['mainText'] as String? ?? '',
       secondaryText: json['secondaryText'] as String? ?? '',
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0,
+    );
+  }
+}
+
+class RideStopPickerContext {
+  const RideStopPickerContext({
+    required this.mapPreviewUrl,
+    required this.gasStations,
+    this.mapCenterLatitude = 0,
+    this.mapCenterLongitude = 0,
+    this.mapZoom = 0,
+    this.mapWidth = 640,
+    this.mapHeight = 352,
+  });
+
+  final String mapPreviewUrl;
+  final List<RidePlacePrediction> gasStations;
+  final double mapCenterLatitude;
+  final double mapCenterLongitude;
+  final int mapZoom;
+  final int mapWidth;
+  final int mapHeight;
+
+  factory RideStopPickerContext.fromJson(Map<String, dynamic> json) {
+    return RideStopPickerContext(
+      mapPreviewUrl: json['mapPreviewUrl'] as String? ?? '',
+      gasStations: _list(json['gasStations'])
+          .map((item) => RidePlacePrediction.fromJson(_map(item)))
+          .where((place) => place.placeId.isNotEmpty)
+          .toList(growable: false),
+      mapCenterLatitude:
+          (_map(json['mapCenter'])['latitude'] as num?)?.toDouble() ?? 0,
+      mapCenterLongitude:
+          (_map(json['mapCenter'])['longitude'] as num?)?.toDouble() ?? 0,
+      mapZoom: (json['mapZoom'] as num?)?.toInt() ?? 0,
+      mapWidth: (json['mapWidth'] as num?)?.toInt() ?? 640,
+      mapHeight: (json['mapHeight'] as num?)?.toInt() ?? 352,
     );
   }
 }

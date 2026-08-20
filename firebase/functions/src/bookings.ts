@@ -27,6 +27,7 @@ import {
   liveTripMapsSecret,
   refreshLiveTripAfterPickup,
 } from "./live_trips.js";
+import {isCaliforniaAddress} from "./service_area.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -282,6 +283,9 @@ function bookingJson(
     confirmedAt: timestampIso(data.confirmedAt),
     startedAt: timestampIso(data.startedAt),
     completedAt: timestampIso(data.completedAt),
+    ratedAt: timestampIso(data.ratedAt),
+    ratingSkippedAt: timestampIso(data.ratingSkippedAt),
+    riderRatedAt: timestampIso(data.riderRatedAt),
     baseFareCents: data.baseFareCents ?? 0,
     serviceFeeCents: data.serviceFeeCents ?? 0,
     processingFeeCents: data.processingFeeCents ?? 0,
@@ -316,6 +320,7 @@ interface BookingPlace {
   formattedAddress: string;
   latitude: number;
   longitude: number;
+  administrativeAreaCode: string;
 }
 
 async function mapsJson(url: string, init: RequestInit): Promise<Json> {
@@ -339,7 +344,7 @@ async function bookingPlace(placeId: string): Promise<BookingPlace> {
       method: "GET",
       headers: {
         "X-Goog-Api-Key": googleMapsApiKey.value(),
-        "X-Goog-FieldMask": "id,displayName,formattedAddress,location",
+        "X-Goog-FieldMask": "id,displayName,formattedAddress,location,addressComponents",
       },
     },
   );
@@ -357,7 +362,16 @@ async function bookingPlace(placeId: string): Promise<BookingPlace> {
     formattedAddress: response.formattedAddress,
     latitude: location.latitude,
     longitude: location.longitude,
+    administrativeAreaCode: isCaliforniaAddress(response.addressComponents) ? "CA" : "",
   };
+}
+
+function requireCaliforniaBookingPlace(place: BookingPlace, field: string): void {
+  if (place.administrativeAreaCode === "CA") return;
+  throw new HttpsError(
+    "failed-precondition",
+    `${field} must be located in California.`,
+  );
 }
 
 async function rideBoundaryRings(): Promise<PolygonRing[]> {
@@ -410,6 +424,8 @@ async function validatedBookingStops(params: {
     remoteNumber("max_route_detour_miles"),
     rideBoundaryRings(),
   ]);
+  requireCaliforniaBookingPlace(pickup, "Pickup");
+  requireCaliforniaBookingPlace(dropoff, "Drop-off");
   const pickupMatch = routePointAllowed({
     point: pickup,
     route,
@@ -1210,6 +1226,22 @@ export const blockUser = onCall(
         createdAt: FieldValue.serverTimestamp(),
       }, {merge: true});
 
+    const conversations = await db.collection("conversations")
+      .where("participantIds", "array-contains", request.auth.uid)
+      .limit(100).get();
+    const conversationWrites = db.batch();
+    for (const conversation of conversations.docs) {
+      const participants = Array.isArray(conversation.data().participantIds) ?
+        conversation.data().participantIds.map(String) : [];
+      if (participants.includes(targetUserId)) {
+        conversationWrites.update(conversation.ref, {
+          [`hiddenFor.${request.auth.uid}`]: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+    await conversationWrites.commit();
+
     const bookings = await bookingsBetweenUsers(request.auth.uid, targetUserId);
     let removedBookings = 0;
     for (const booking of bookings) {
@@ -1513,7 +1545,10 @@ export const verifyPickupCode = onCall(
         errorName: error instanceof Error ? error.name : "UnknownError",
       });
     }
-    await notify(String(booking.riderId), "pickup_confirmed", {bookingId: id});
+    await notify(String(booking.riderId), "pickup_confirmed", {
+      bookingId: id,
+      rideId: String(booking.rideId),
+    });
     return {status: "in_progress", estimatedCompletionAt: completionAt.toDate().toISOString()};
   },
 );
@@ -1580,8 +1615,14 @@ async function completeAndPayBooking(
     return false;
   }
   await Promise.all([
-    notify(String(booking.riderId), "trip_completed", {bookingId: reference.id}),
-    notify(String(booking.driverId), "payout_released", {bookingId: reference.id}),
+    notify(String(booking.riderId), "trip_completed", {
+      bookingId: reference.id,
+      rideId: String(booking.rideId),
+    }),
+    notify(String(booking.driverId), "payout_released", {
+      bookingId: reference.id,
+      rideId: String(booking.rideId),
+    }),
   ]);
   return true;
 }
@@ -1705,6 +1746,86 @@ export const rateCompletedTrip = onCall(
   },
 );
 
+export const dismissTripRating = onCall(
+  {region, enforceAppCheck: true, maxInstances: 60},
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    const id = stringValue(object(request.data).bookingId, "Booking", 128);
+    const reference = db.collection("bookings").doc(id);
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(reference);
+      const booking = snapshot.data();
+      if (!booking || booking.riderId !== request.auth?.uid) {
+        throw new HttpsError("permission-denied", "You cannot update this trip.");
+      }
+      if (!new Set(["completed", "payout_held"]).has(String(booking.status))) {
+        throw new HttpsError("failed-precondition", "Complete the trip first.");
+      }
+      transaction.update(reference, {
+        ratingSkippedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+    return {status: "dismissed"};
+  },
+);
+
+export const rateRider = onCall(
+  {region, enforceAppCheck: true, maxInstances: 60},
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    const data = object(request.data);
+    const bookingId = stringValue(data.bookingId, "Booking", 128);
+    const rating = Number(data.rating);
+    const comment = typeof data.comment === "string" ? data.comment.trim() : "";
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new HttpsError("invalid-argument", "Choose a rating from 1 to 5.");
+    }
+    if (comment.length > 800) {
+      throw new HttpsError("invalid-argument", "Your feedback is too long.");
+    }
+    const bookingReference = db.collection("bookings").doc(bookingId);
+    const ratingReference = db.collection("rider_ratings").doc(bookingId);
+    const created = await db.runTransaction(async (transaction) => {
+      const bookingSnapshot = await transaction.get(bookingReference);
+      const booking = bookingSnapshot.data();
+      if (!booking || booking.driverId !== request.auth?.uid) {
+        throw new HttpsError("permission-denied", "You cannot rate this rider.");
+      }
+      if (!new Set(["completed", "payout_held"]).has(String(booking.status))) {
+        throw new HttpsError("failed-precondition", "Complete the trip before rating the rider.");
+      }
+      if ((await transaction.get(ratingReference)).exists) return false;
+      const riderReference = db.collection("users").doc(String(booking.riderId));
+      const rider = (await transaction.get(riderReference)).data() ?? {};
+      const currentCount = Math.max(0, Number(rider.riderRatingCount ?? 0));
+      const currentRating = Math.max(0, Number(rider.riderRating ?? 0));
+      const nextCount = currentCount + 1;
+      const nextRating = ((currentRating * currentCount) + rating) / nextCount;
+      transaction.create(ratingReference, {
+        bookingId,
+        rideId: booking.rideId,
+        driverId: request.auth!.uid,
+        riderId: booking.riderId,
+        rating,
+        comment,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      transaction.set(riderReference, {
+        riderRating: nextRating,
+        riderRatingCount: nextCount,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+      transaction.update(bookingReference, {
+        riderRatedAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+    return {status: created ? "rated" : "already_rated"};
+  },
+);
+
 export const disputeBooking = onCall(
   {region, enforceAppCheck: true, maxInstances: 30},
   async (request) => {
@@ -1752,15 +1873,28 @@ export const createDriverConnectAccount = onCall(
     const reference = db.collection("payment_accounts").doc(request.auth.uid);
     const existing = (await reference.get()).data();
     let accountId = typeof existing?.stripeAccountId === "string" ? existing.stripeAccountId : "";
+    const record = await auth.getUser(request.auth.uid);
+    const firstName = String(profile.firstName ?? "").trim();
+    const lastName = String(profile.lastName ?? "").trim();
+    const accountProfile: Stripe.AccountCreateParams.BusinessProfile = {
+      mcc: "4789",
+      product_description: "Peer-to-peer university ridesharing",
+      support_email: record.email ?? undefined,
+      url: "https://sidecar-fb0e7.web.app",
+    };
     if (!accountId) {
-      const record = await auth.getUser(request.auth.uid);
       const account = await stripe().accounts.create({
         type: "express",
         country: "US",
         email: record.email,
         business_type: "individual",
-        business_profile: {
-          product_description: "Peer-to-peer university ridesharing",
+        capabilities: {transfers: {requested: true}},
+        tos_acceptance: {service_agreement: "recipient"},
+        business_profile: accountProfile,
+        individual: {
+          first_name: firstName || undefined,
+          last_name: lastName || undefined,
+          email: record.email ?? undefined,
         },
         metadata: {sidecarUid: request.auth.uid},
       }, {idempotencyKey: `connect-account-${request.auth.uid}`});
@@ -1771,6 +1905,17 @@ export const createDriverConnectAccount = onCall(
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
+    } else {
+      await stripe().accounts.update(accountId, {
+        business_type: "individual",
+        capabilities: {transfers: {requested: true}},
+        business_profile: accountProfile,
+        individual: {
+          first_name: firstName || undefined,
+          last_name: lastName || undefined,
+          email: record.email ?? undefined,
+        },
+      });
     }
     const returnUrl = await remoteValue("stripe_connect_return_url");
     const refreshUrl = await remoteValue("stripe_connect_refresh_url");
@@ -1779,6 +1924,7 @@ export const createDriverConnectAccount = onCall(
       return_url: returnUrl,
       refresh_url: refreshUrl,
       type: "account_onboarding",
+      collection_options: {fields: "currently_due"},
     });
     return {url: link.url};
   },

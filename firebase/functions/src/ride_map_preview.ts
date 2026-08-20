@@ -2,15 +2,17 @@ import {createHash} from "node:crypto";
 
 const staticMapsEndpoint = "https://maps.googleapis.com/maps/api/staticmap";
 const publicMapPreviewBaseUrl = "https://sidecar-fb0e7.web.app/ride-map";
-const routeMapWidth = 640;
-const routeMapHeight = 252;
-const topMapExtension = 100;
+export const routeMapWidth = 640;
+export const routeMapHeight = 252;
+export const topMapExtension = 100;
 
 export interface RideMapPreviewRequest {
   apiKey: string;
   encodedPolyline: string;
   origin: {latitude: number; longitude: number};
   destination: {latitude: number; longitude: number};
+  selectedStop?: {latitude: number; longitude: number};
+  gasStations?: Array<{latitude: number; longitude: number}>;
 }
 
 export function rideMapPreviewUrl(
@@ -25,6 +27,33 @@ export function rideMapPreviewUrl(
       .digest("hex")
       .slice(0, 12);
     url.searchParams.set("v", `5-${routeDigest}`);
+  }
+  return url.toString();
+}
+
+export function rideStopMapPreviewUrl(params: {
+  rideId: string;
+  encodedPolyline: string;
+  selectedStop?: {latitude: number; longitude: number};
+  gasStations: Array<{latitude: number; longitude: number}>;
+}): string {
+  const url = new URL(rideMapPreviewUrl(params.rideId, params.encodedPolyline));
+  if (params.selectedStop) {
+    url.searchParams.set(
+      "pin",
+      `${params.selectedStop.latitude.toFixed(6)},${params.selectedStop.longitude.toFixed(6)}`,
+    );
+  }
+  if (params.gasStations.length > 0) {
+    url.searchParams.set(
+      "gas",
+      params.gasStations
+        .slice(0, 20)
+        .map((station) =>
+          `${station.latitude.toFixed(6)},${station.longitude.toFixed(6)}`,
+        )
+        .join(";"),
+    );
   }
   return url.toString();
 }
@@ -48,7 +77,7 @@ export function compactEncodedPolyline(
 }
 
 export function googleStaticMapUrl(request: RideMapPreviewRequest): string {
-  const viewport = extendedMapViewport(request);
+  const viewport = rideMapViewport(request);
   const url = new URL(staticMapsEndpoint);
   url.searchParams.set("key", request.apiKey);
   url.searchParams.set(
@@ -97,10 +126,28 @@ export function googleStaticMapUrl(request: RideMapPreviewRequest): string {
     "markers",
     `size:tiny|color:0x111111|${request.destination.latitude},${request.destination.longitude}`,
   );
+  if (request.gasStations && request.gasStations.length > 0) {
+    url.searchParams.append(
+      "markers",
+      `size:tiny|color:0x7a7a7a|${request.gasStations
+        .slice(0, 20)
+        .map((station) => `${station.latitude},${station.longitude}`)
+        .join("|")}`,
+    );
+  }
+  if (request.selectedStop) {
+    url.searchParams.append(
+      "markers",
+      `size:mid|color:0x111111|${request.selectedStop.latitude},${request.selectedStop.longitude}`,
+    );
+  }
   return url.toString();
 }
 
-function extendedMapViewport(request: RideMapPreviewRequest): {
+export function rideMapViewport(request: Pick<
+  RideMapPreviewRequest,
+  "encodedPolyline" | "origin" | "destination"
+>): {
   center: {latitude: number; longitude: number};
   zoom: number;
 } {

@@ -230,8 +230,8 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
             children: [
               _ProfileRow(
                 icon: Icons.shield_outlined,
-                title: 'Safety tools',
-                subtitle: 'Block or report a user',
+                title: 'Blocked users',
+                subtitle: 'Review and unblock accounts',
                 onTap: () => context.push(AppRoutes.safetyTools),
               ),
               const _ProfileRow(

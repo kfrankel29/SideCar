@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/core/widgets/app_notice.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
+import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_widgets.dart';
+import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 class BookingCheckoutScreen extends ConsumerStatefulWidget {
@@ -432,13 +435,13 @@ class PayoutHistoryScreen extends ConsumerWidget {
   }
 }
 
-class PickupCodeScreen extends StatelessWidget {
+class PickupCodeScreen extends ConsumerWidget {
   const PickupCodeScreen({required this.booking, super.key});
 
   final SeatBooking booking;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final code = (booking.pickupCode ?? '----').padRight(4, '-');
     return Scaffold(
       appBar: AppBar(),
@@ -503,7 +506,27 @@ class PickupCodeScreen extends StatelessWidget {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: null,
+                      onPressed: () async {
+                        try {
+                          final conversation = await ref
+                              .read(messagingRepositoryProvider)
+                              .openBookingConversation(booking.id);
+                          if (context.mounted) {
+                            context.push(
+                              AppRoutes.chat.replaceFirst(
+                                ':conversationId',
+                                conversation.id,
+                              ),
+                            );
+                          }
+                        } on AppFailure catch (error) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(error.message)),
+                            );
+                          }
+                        }
+                      },
                       child: const Text('Message'),
                     ),
                   ),

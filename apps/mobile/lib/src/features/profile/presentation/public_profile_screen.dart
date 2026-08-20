@@ -5,6 +5,7 @@ import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/core/widgets/app_notice.dart';
 import 'package:sidecar/src/features/profile/domain/public_profile.dart';
 import 'package:sidecar/src/features/profile/domain/public_profile_repository.dart';
+import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_widgets.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
@@ -79,6 +80,20 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
     }
   }
 
+  Future<void> _message(PublicProfile profile) async {
+    try {
+      final conversation = await ref
+          .read(messagingRepositoryProvider)
+          .openDirectConversation(profile.userId);
+      if (!mounted) return;
+      context.push('/messages/${conversation.id}');
+    } on AppFailure catch (error) {
+      if (mounted) {
+        showAppNotice(context, error.message, kind: AppNoticeKind.error);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -101,6 +116,7 @@ class _PublicProfileScreenState extends ConsumerState<PublicProfileScreen> {
             blocked: data.$2,
             onBlock: () => _block(data.$1),
             onUnblock: () => _unblock(data.$1),
+            onMessage: () => _message(data.$1),
           );
         },
       ),
@@ -114,12 +130,14 @@ class _ProfileBody extends StatelessWidget {
     required this.blocked,
     required this.onBlock,
     required this.onUnblock,
+    required this.onMessage,
   });
 
   final PublicProfile profile;
   final bool blocked;
   final VoidCallback onBlock;
   final VoidCallback onUnblock;
+  final VoidCallback onMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -177,6 +195,11 @@ class _ProfileBody extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 34),
+          FilledButton(
+            onPressed: blocked ? null : onMessage,
+            child: const Text('Message'),
+          ),
+          const SizedBox(height: 10),
           OutlinedButton(
             onPressed: () => context.push(
               '${AppRoutes.reportUser}?uid=${Uri.encodeQueryComponent(profile.userId)}&name=${Uri.encodeQueryComponent(profile.displayName)}',

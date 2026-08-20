@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/core/widgets/app_notice.dart';
+import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
+import 'package:sidecar/src/features/notifications/domain/notification_service.dart';
+import 'package:sidecar/src/features/navigation/domain/tab_activation.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
@@ -19,17 +22,53 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
     with WidgetsBindingObserver {
   bool _wasBackgrounded = false;
   bool _isValidatingSession = false;
+  int _notificationInitializationAttempts = 0;
+  StreamSubscription<NotificationAction>? _notificationSubscription;
+  StreamSubscription<NotificationAction>? _notificationUpdateSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    scheduleMicrotask(_initializeNotifications);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _notificationSubscription?.cancel();
+    _notificationUpdateSubscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _initializeNotifications() async {
+    final service = ref.read(notificationServiceProvider);
+    _notificationSubscription ??= service.actions.listen(_openNotification);
+    _notificationUpdateSubscription ??= service.updates.listen(
+      (_) => _refreshNotificationState(),
+    );
+    try {
+      await service.initialize();
+    } on Object {
+      if (!mounted || _notificationInitializationAttempts >= 2) return;
+      _notificationInitializationAttempts += 1;
+      await Future<void>.delayed(
+        Duration(seconds: _notificationInitializationAttempts),
+      );
+      if (mounted) await _initializeNotifications();
+    }
+  }
+
+  void _openNotification(NotificationAction action) {
+    if (!mounted) return;
+    final router = ref.read(appRouterProvider);
+    router.go(notificationDestination(action.data));
+  }
+
+  void _refreshNotificationState() {
+    if (!mounted) return;
+    ref.invalidate(driverPendingRequestCountProvider);
+    ref.read(mainTabActivationProvider.notifier).activate(0);
   }
 
   @override
@@ -43,6 +82,7 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
       case AppLifecycleState.resumed:
         if (_wasBackgrounded) {
           _wasBackgrounded = false;
+          _refreshNotificationState();
           unawaited(_validateRestoredSession());
         }
     }
@@ -71,8 +111,7 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
         _resetToWelcome();
       }
     } on Object {
-      // Keep the persisted session during transient network failures. A null
-      // validation result or deleted server profile is handled above.
+      return;
     } finally {
       _isValidatingSession = false;
     }
@@ -103,4 +142,22 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
       },
     );
   }
+}
+
+String notificationDestination(Map<String, String> data) {
+  final conversationId = data['conversationId']?.trim();
+  if (conversationId != null && conversationId.isNotEmpty) {
+    return '/messages/${Uri.encodeComponent(conversationId)}';
+  }
+
+  final route = data['route']?.trim();
+  final rideId = data['rideId']?.trim();
+  if ((route == 'live_trip' || route == 'rating') &&
+      rideId != null &&
+      rideId.isNotEmpty) {
+    return '/rides/${Uri.encodeComponent(rideId)}';
+  }
+
+  if (route == 'messages') return AppRoutes.messages;
+  return AppRoutes.myRides;
 }

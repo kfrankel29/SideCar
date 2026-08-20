@@ -71,6 +71,8 @@ void main() {
       'safety-tools': AppRoutes.safetyTools,
       'block-user': '${AppRoutes.blockUser}?uid=visual-target&name=Jordan',
       'report-user': '${AppRoutes.reportUser}?uid=visual-target&name=Jordan',
+      'report-submitted':
+          '${AppRoutes.reportUser}?uid=visual-target&name=Jordan',
     };
 
     for (final entry in routes.entries) {
@@ -138,6 +140,10 @@ Future<void> _applyFinalDraftState(WidgetTester tester, String screen) async {
     case 'new-password':
       await tester.enterText(fields.at(0), 'password1');
       await tester.enterText(fields.at(1), 'password1');
+    case 'report-submitted':
+      await tester.tap(find.text('Unsafe behavior'));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
   }
   FocusManager.instance.primaryFocus?.unfocus();
   await tester.pumpAndSettle();
@@ -282,6 +288,9 @@ class _QaVerificationRepository implements VerificationRepository {
 }
 
 class _QaSafetyRepository implements SafetyRepository {
+  @override
+  Future<List<BlockedUser>> listBlockedUsers() async => const [];
+
   @override
   Future<bool> isBlocked(String targetUserId) async => false;
 

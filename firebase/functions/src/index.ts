@@ -15,13 +15,16 @@ import {
   stripeIdentitySessionUid,
   stripeIdentityStatusForEvent,
 } from "./stripe_identity.js";
+import {authEmailEnvelope, defaultAuthEmailSender} from "./auth_email.js";
 
 export {
   cancelRide,
   createRide,
   getRide,
+  getRideStopPickerContext,
   listLeavingSoon,
   listMyRides,
+  resolveRideStopPin,
   rideMapPreview,
   rideSharePage,
   searchPlaces,
@@ -30,6 +33,21 @@ export {
 } from "./rides.js";
 
 export {getLiveTrip, startLiveTrip} from "./live_trips.js";
+
+export {
+  createConversationForBooking,
+  markConversationRead,
+  openBookingConversation,
+  openDirectConversation,
+  sendRideMessage,
+} from "./messaging.js";
+
+export {
+  deliverPushNotification,
+  registerPushToken,
+  sendTripReminders,
+  unregisterPushToken,
+} from "./push_notifications.js";
 
 export {
   blockUser,
@@ -47,7 +65,11 @@ export {
   listPaymentMethods,
   listRideRequests,
   quoteBookingPayment,
+  dismissTripRating,
+  rateCompletedTrip,
   rateCompletedTrip as submitTripRating,
+  rateRider,
+  rateRider as submitRiderRating,
   refreshBooking,
   requestSeat,
   respondSeatRequest,
@@ -157,6 +179,19 @@ async function allowedTestEmails(): Promise<Set<string>> {
   return new Set();
 }
 
+async function authEmailSender(): Promise<string> {
+  try {
+    const template = await getRemoteConfig().getTemplate();
+    const value = template.parameters["auth_email_sender"]?.defaultValue;
+    if (value && "value" in value && value.value.trim()) {
+      return value.value.trim();
+    }
+  } catch {
+    return defaultAuthEmailSender;
+  }
+  return defaultAuthEmailSender;
+}
+
 async function assertAllowedSchoolEmail(email: string): Promise<void> {
   if ((await allowedTestEmails()).has(email)) return;
   const domain = email.split("@").at(-1) ?? "";
@@ -215,12 +250,13 @@ async function sendOtp(params: {
   const subject = purpose === "verify_email" ? "Verify your SideCar email" : "Reset your SideCar password";
   const action = purpose === "verify_email" ? "verify your school email" : "reset your password";
   await db.collection("mail").add({
-    to: email,
-    message: {
+    ...authEmailEnvelope({
+      to: email,
+      sender: await authEmailSender(),
       subject,
       text: `Your SideCar code is ${code}. It expires in ${otpLifetimeMinutes} minutes.`,
       html: `<p>Use this code to ${action}:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${code}</p><p>This code expires in ${otpLifetimeMinutes} minutes and can be used once.</p>`,
-    },
+    }),
     createdAt: FieldValue.serverTimestamp(),
   });
 }
@@ -823,6 +859,44 @@ export const getBlockStatus = onCall(
   },
 );
 
+export const listBlockedUsers = onCall(
+  {region, enforceAppCheck: true, maxInstances: 30},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Please sign in again.");
+    }
+    const snapshot = await db.collection("users").doc(request.auth.uid)
+      .collection("blockedUsers").orderBy("createdAt", "desc").limit(100).get();
+    const users = await Promise.all(snapshot.docs.map(async (document) => {
+      const blockedAt = document.data().createdAt as Timestamp | undefined;
+      try {
+        const [account, profileSnapshot] = await Promise.all([
+          auth.getUser(document.id),
+          db.collection("users").doc(document.id).get(),
+        ]);
+        const profile = profileSnapshot.data() ?? {};
+        const displayName = String(profile.displayName ?? account.displayName ?? "SideCar member").trim();
+        return {
+          id: document.id,
+          displayName,
+          initials: displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase(),
+          photoUrl: String(profile.photoUrl ?? account.photoURL ?? ""),
+          blockedAt: blockedAt?.toMillis() ?? null,
+        };
+      } catch {
+        return {
+          id: document.id,
+          displayName: "SideCar member",
+          initials: "SC",
+          photoUrl: "",
+          blockedAt: blockedAt?.toMillis() ?? null,
+        };
+      }
+    }));
+    return {users};
+  },
+);
+
 export const unblockUser = onCall(
   {region, enforceAppCheck: true, maxInstances: 30},
   async (request) => {
@@ -833,6 +907,21 @@ export const unblockUser = onCall(
     const blockedUid = targetUid(data.targetUserId, request.auth.uid);
     await db.collection("users").doc(request.auth.uid)
       .collection("blockedUsers").doc(blockedUid).delete();
+    const conversations = await db.collection("conversations")
+      .where("participantIds", "array-contains", request.auth.uid)
+      .limit(100).get();
+    const writes = db.batch();
+    for (const conversation of conversations.docs) {
+      const participants = Array.isArray(conversation.data().participantIds) ?
+        conversation.data().participantIds.map(String) : [];
+      if (participants.includes(blockedUid)) {
+        writes.update(conversation.ref, {
+          [`hiddenFor.${request.auth.uid}`]: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    }
+    await writes.commit();
     return {blocked: false};
   },
 );

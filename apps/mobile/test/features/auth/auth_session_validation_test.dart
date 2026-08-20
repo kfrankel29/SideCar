@@ -231,6 +231,19 @@ class _EmptyRideRepository implements RideRepository {
   Future<Ride> getRide(String rideId) => throw UnimplementedError();
 
   @override
+  Future<RideStopPickerContext> getRideStopPickerContext(
+    String rideId, {
+    String selectedPlaceId = '',
+  }) => throw UnimplementedError();
+
+  @override
+  Future<RidePlacePrediction> resolveRideStopPin(
+    String rideId, {
+    required double latitude,
+    required double longitude,
+  }) => throw UnimplementedError();
+
+  @override
   Future<LiveTripPlan> getLiveTrip(String rideId) => throw UnimplementedError();
 
   @override

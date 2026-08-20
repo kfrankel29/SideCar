@@ -8,6 +8,7 @@ import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/auth/presentation/auth_screens.dart';
 import 'package:sidecar/src/features/diagnostics/presentation/config_diagnostics_screen.dart';
 import 'package:sidecar/src/features/navigation/presentation/main_tab_shell.dart';
+import 'package:sidecar/src/features/messaging/presentation/messaging_screens.dart';
 import 'package:sidecar/src/features/profile/presentation/profile_screens.dart';
 import 'package:sidecar/src/features/profile/presentation/public_profile_screen.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
@@ -51,6 +52,7 @@ abstract final class AppRoutes {
   static const postRide = action;
   static const myRides = '/rides/mine';
   static const messages = '/messages';
+  static const chat = '/messages/:conversationId';
   static const account = '/account';
   static const publicProfile = '/profiles/:userId';
   static const stripeRedirect = '/stripe-redirect';
@@ -78,12 +80,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     navigatorKey: _rootNavigatorKey,
     initialLocation: AppRoutes.initialLocation,
     redirect: (_, state) {
+      final deepLink = sideCarDeepLinkDestination(state.uri);
+      if (deepLink != null) return deepLink;
       if (!isStripeReturnLocation(state.uri)) return null;
       return stripeReturnDestination(
         state.uri,
         signedIn: ref.read(authRepositoryProvider).currentUser != null,
       );
     },
+    errorBuilder: (_, _) => const _RouteRecoveryScreen(),
     routes: [
       GoRoute(
         path: AppRoutes.opening,
@@ -268,6 +273,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ],
       ),
       GoRoute(
+        path: AppRoutes.chat,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, state) => ChatScreen(
+          conversationId: state.pathParameters['conversationId'] ?? '',
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.searchResults,
         parentNavigatorKey: _rootNavigatorKey,
         builder: (_, state) => SearchResultsScreen(
@@ -314,4 +326,46 @@ bool isStripeReturnLocation(Uri uri) {
 String? stripeReturnDestination(Uri uri, {required bool signedIn}) {
   if (!isStripeReturnLocation(uri)) return null;
   return signedIn ? AppRoutes.account : AppRoutes.opening;
+}
+
+String? sideCarDeepLinkDestination(Uri uri) {
+  if (uri.scheme != 'sidecar') return null;
+  if (isStripeReturnLocation(uri)) return null;
+  if (uri.host == 'messages') return AppRoutes.messages;
+  if (uri.host == 'home') return AppRoutes.home;
+  if (uri.host == 'app') {
+    if (uri.path == AppRoutes.messages) return AppRoutes.messages;
+    if (uri.path == AppRoutes.home || uri.path == '/') return AppRoutes.home;
+  }
+  return null;
+}
+
+class _RouteRecoveryScreen extends StatelessWidget {
+  const _RouteRecoveryScreen();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'This link is no longer available.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: () => context.go(AppRoutes.home),
+                child: const Text('Back to SideCar'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

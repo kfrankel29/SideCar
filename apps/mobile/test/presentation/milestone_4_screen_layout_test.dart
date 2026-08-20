@@ -331,20 +331,22 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Rate driver and trip'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('How was Jordan?-5')));
-    await tester.tap(find.byKey(const ValueKey('How was the trip?-4')));
+    expect(find.text('Home safe'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('driver-5')));
     await tester.tap(find.text('Submit rating'));
     await tester.pumpAndSettle();
 
     expect(bookings.ratedBookingId, 'booking-1');
     expect(bookings.driverRating, 5);
-    expect(bookings.tripRating, 4);
+    expect(bookings.tripRating, 5);
     expect(tester.takeException(), isNull);
   });
 }
 
 class _M4SafetyRepository implements SafetyRepository {
+  @override
+  Future<List<BlockedUser>> listBlockedUsers() async => const [];
+
   _M4SafetyRepository({this.blocked = false});
 
   final bool blocked;
@@ -478,6 +480,17 @@ class _M4RideRepository implements RideRepository {
   Future<Ride> createRide(RideDraft draft) async => _unused();
   @override
   Future<Ride> getRide(String rideId) async => _liveRide();
+  @override
+  Future<RideStopPickerContext> getRideStopPickerContext(
+    String rideId, {
+    String selectedPlaceId = '',
+  }) async => _unused();
+  @override
+  Future<RidePlacePrediction> resolveRideStopPin(
+    String rideId, {
+    required double latitude,
+    required double longitude,
+  }) async => _unused();
   @override
   void invalidateRide(String rideId) {}
   @override
