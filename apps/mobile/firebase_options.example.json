@@ -5,5 +5,6 @@
   "FIREBASE_PROJECT_ID": "sidecar-fb0e7",
   "FIREBASE_STORAGE_BUCKET": "sidecar-fb0e7.firebasestorage.app",
   "SIDECAR_GOOGLE_IOS_CLIENT_ID": "replace-with-the-ios-oauth-client-id",
+  "MAPS_API_KEY": "replace-with-a-platform-restricted-google-maps-key",
   "SIDECAR_GOOGLE_SERVER_CLIENT_ID": "replace-with-the-web-oauth-client-id"
 }

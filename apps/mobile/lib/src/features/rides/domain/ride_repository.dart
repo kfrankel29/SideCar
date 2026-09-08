@@ -6,6 +6,11 @@ abstract interface class RideRepository {
   Future<RideStopPickerContext> getRideStopPickerContext(
     String rideId, {
     String selectedPlaceId = '',
+    List<String> searchPlaceIds = const [],
+    bool includeGasStations = false,
+    String gasStationQuery = '',
+    double? gasStationLatitude,
+    double? gasStationLongitude,
   });
   Future<RidePlacePrediction> resolveRideStopPin(
     String rideId, {

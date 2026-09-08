@@ -36,7 +36,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>CFBundleURLName</key>
-			<string>com.kaileefrankel.sidecar.rides</string>
+			<string>com.ridesidecar.app.rides</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>sidecar</string>
@@ -47,8 +47,12 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>SideCar uses the camera only when you choose to take a profile photo.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SideCar uses your location while you choose pickup and drop-off addresses and follow a trip route.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>SideCar lets you choose a profile photo from your library.</string>
 	<key>UIApplicationSceneManifest</key>

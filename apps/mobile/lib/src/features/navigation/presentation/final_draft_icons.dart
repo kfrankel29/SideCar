@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:sidecar/src/theme/app_theme.dart';
 
 enum FinalDraftIconKind { home, search, post, rides, messages, profile }
+
+enum FinalDraftChevronDirection { left, up, right, down }
 
 class FinalDraftIcon extends StatelessWidget {
   const FinalDraftIcon({
@@ -8,17 +11,19 @@ class FinalDraftIcon extends StatelessWidget {
     required this.selected,
     super.key,
     this.size = 25,
+    this.color,
   });
 
   final FinalDraftIconKind kind;
   final bool selected;
   final double size;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     return ColorFiltered(
       colorFilter: ColorFilter.mode(
-        selected ? const Color(0xFF111111) : const Color(0xFFB5B5BA),
+        color ?? (selected ? AppColors.primary : const Color(0xFFB5B5BA)),
         BlendMode.srcIn,
       ),
       child: Image.asset(
@@ -47,28 +52,76 @@ class FinalDraftBackIcon extends StatelessWidget {
   final double size;
 
   @override
-  Widget build(BuildContext context) =>
-      CustomPaint(size: Size.square(size), painter: const _BackPainter());
+  Widget build(BuildContext context) => Image.asset(
+    'assets/icons/figma/back.png',
+    width: size,
+    height: size,
+    filterQuality: FilterQuality.high,
+    gaplessPlayback: true,
+  );
 }
 
-class _BackPainter extends CustomPainter {
-  const _BackPainter();
+class FinalDraftChevronIcon extends StatelessWidget {
+  const FinalDraftChevronIcon({
+    super.key,
+    this.direction = FinalDraftChevronDirection.right,
+    this.size = 18,
+    this.color,
+  });
+
+  final FinalDraftChevronDirection direction;
+  final double size;
+  final Color? color;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF111111)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    final path = Path()
-      ..moveTo(size.width * .66, size.height * .18)
-      ..lineTo(size.width * .32, size.height * .5)
-      ..lineTo(size.width * .66, size.height * .82);
-    canvas.drawPath(path, paint);
+  Widget build(BuildContext context) {
+    final icon = Image.asset(
+      'assets/icons/figma/back.png',
+      width: size,
+      height: size,
+      filterQuality: FilterQuality.high,
+      gaplessPlayback: true,
+    );
+    final filtered = color == null
+        ? icon
+        : ColorFiltered(
+            colorFilter: ColorFilter.mode(color!, BlendMode.srcIn),
+            child: icon,
+          );
+    return RotatedBox(quarterTurns: _turns, child: filtered);
   }
 
+  int get _turns => switch (direction) {
+    FinalDraftChevronDirection.left => 0,
+    FinalDraftChevronDirection.up => 1,
+    FinalDraftChevronDirection.right => 2,
+    FinalDraftChevronDirection.down => 3,
+  };
+}
+
+class FinalDraftAssetIcon extends StatelessWidget {
+  const FinalDraftAssetIcon(this.name, {super.key, this.size = 24, this.color});
+
+  final String name;
+  final double size;
+  final Color? color;
+
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  Widget build(BuildContext context) {
+    final image = Image.asset(
+      name == 'search'
+          ? 'assets/icons/tabs/search.png'
+          : 'assets/icons/figma/$name.png',
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
+      gaplessPlayback: true,
+    );
+    if (color == null) return image;
+    return ColorFiltered(
+      colorFilter: ColorFilter.mode(color!, BlendMode.srcIn),
+      child: image,
+    );
+  }
 }

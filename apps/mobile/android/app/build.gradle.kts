@@ -25,13 +25,36 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["MAPS_API_KEY"] =
+            providers.gradleProperty("MAPS_API_KEY")
+                .orElse(providers.environmentVariable("MAPS_API_KEY"))
+                .orElse("")
+                .get()
+    }
+
+    signingConfigs {
+        create("release") {
+            val keyStorePath = providers.environmentVariable("SIDECAR_UPLOAD_KEYSTORE").orNull
+            val keyStorePassword = providers.environmentVariable("SIDECAR_UPLOAD_STORE_PASSWORD").orNull
+            val uploadKeyAlias = providers.environmentVariable("SIDECAR_UPLOAD_KEY_ALIAS").orNull
+            val uploadKeyPassword = providers.environmentVariable("SIDECAR_UPLOAD_KEY_PASSWORD").orNull
+            if (
+                keyStorePath != null &&
+                keyStorePassword != null &&
+                uploadKeyAlias != null &&
+                uploadKeyPassword != null
+            ) {
+                storeFile = file(keyStorePath)
+                storePassword = keyStorePassword
+                keyAlias = uploadKeyAlias
+                keyPassword = uploadKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

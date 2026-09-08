@@ -17,7 +17,20 @@ import 'package:sidecar/src/features/rides/presentation/place_picker_sheet.dart'
 import 'package:sidecar/src/features/rides/presentation/live_trip_screen.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_widgets.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
+import 'package:sidecar/src/features/profile/presentation/account_support_screens.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
+
+String _rideShareText(Ride ride) => [
+  'SideCar trip',
+  '${ride.origin.displayName} → ${ride.destination.displayName}',
+  '${formatShortDate(ride.departureAt)} at ${formatTime(ride.departureAt)}',
+  '${ride.priceLabel} per seat · ${ride.seatsAvailable} seats available',
+  'Luggage: ${ride.luggageAllowance.label}',
+  'Rider preference: ${ride.genderRestriction.label}',
+  if (ride.vehicle.makeAndModel.isNotEmpty)
+    'Vehicle: ${ride.vehicle.makeAndModel}',
+  ride.shareUrl,
+].join('\n');
 
 class RideDetailsScreen extends ConsumerStatefulWidget {
   const RideDetailsScreen({required this.rideId, super.key});
@@ -74,23 +87,9 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
   }
 
   Future<void> _cancelRide(Ride ride) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancel this ride?'),
-        content: const Text(
-          'The ride will be removed from search and can no longer accept riders.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep ride'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancel ride'),
-          ),
-        ],
+    final confirmed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CancelRideConfirmationScreen(ride: ride),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -238,6 +237,9 @@ class _RideDetails extends StatelessWidget {
                 children: [
                   RideMapPreview(
                     mapPreviewUrl: ride.mapPreviewUrl,
+                    encodedPolyline: ride.encodedPolyline,
+                    origin: ride.origin,
+                    destination: ride.destination,
                     topExtension: topInset,
                   ),
                   Positioned(
@@ -303,46 +305,21 @@ class _RideDetails extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    SizedBox(
-                      height: 116,
-                      child: RideRouteCard(
-                        origin: ride.origin.displayName,
-                        destination: ride.destination.displayName,
-                        originSubtitle:
-                            '${formatShortDate(ride.departureAt)} · ${formatTime(ride.departureAt)}',
-                        destinationSubtitle:
-                            'ETA ${formatTime(ride.departureAt.add(Duration(seconds: ride.durationSeconds)))}',
-                        backgroundColor: AppColors.softSurface,
-                        showBorder: false,
-                      ),
+                    RideSummaryCard(
+                      origin: ride.origin.displayName,
+                      destination: ride.destination.displayName,
+                      dateLabel: formatShortDate(ride.departureAt),
+                      timeLabel: formatTime(ride.departureAt),
+                      priceLabel: ride.priceLabel,
+                      bookedLabel:
+                          '${ride.bookedSeats}/${ride.seatsTotal} booked',
+                      keyPrefix: 'rider-detail-${ride.id}',
                     ),
                     const SizedBox(height: 24),
                     if (booking != null) ...[
                       _BookedTripDetails(booking: booking!),
                       const SizedBox(height: 22),
                     ],
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Pick your seat',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                        ),
-                        Text(
-                          'Same price, any seat',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 13),
-                    _SeatDiagram(
-                      ride: ride,
-                      selectedSeat: booking?.seat ?? selectedSeat,
-                      onSelected: booking == null ? onSeatSelected : (_) {},
-                      interactive: booking == null,
-                    ),
-                    const SizedBox(height: 20),
                     Row(
                       children: [
                         Expanded(
@@ -358,6 +335,31 @@ class _RideDetails extends StatelessWidget {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 18),
+                    _DetailValue(
+                      label: 'Vehicle',
+                      value: ride.vehicle.makeAndModel.isEmpty
+                          ? 'Not provided'
+                          : ride.vehicle.makeAndModel,
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Pick your seat',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 13),
+                    _SeatDiagram(
+                      ride: ride,
+                      selectedSeat: booking?.seat ?? selectedSeat,
+                      onSelected: booking == null ? onSeatSelected : (_) {},
+                      interactive: booking == null,
                     ),
                   ],
                 ),
@@ -408,19 +410,25 @@ class _RideDetails extends StatelessWidget {
   }
 }
 
-String _bookedTripTitle(SeatBooking booking) => switch (booking.status) {
-  BookingStatus.inProgress => 'Trip in progress',
-  BookingStatus.completed => 'Trip complete',
-  BookingStatus.payoutHeld => 'Trip complete',
-  _ => 'Your ride',
-};
+String _bookedTripTitle(SeatBooking booking) {
+  if (booking.riderNoShow) return 'Marked as no-show';
+  return switch (booking.status) {
+    BookingStatus.inProgress => 'Trip in progress',
+    BookingStatus.completed => 'Trip complete',
+    BookingStatus.payoutHeld => 'Trip complete',
+    _ => 'Your ride',
+  };
+}
 
-String _bookedTripStatus(SeatBooking booking) => switch (booking.status) {
-  BookingStatus.inProgress => 'In progress',
-  BookingStatus.completed => 'Completed',
-  BookingStatus.payoutHeld => 'Completed',
-  _ => 'Confirmed',
-};
+String _bookedTripStatus(SeatBooking booking) {
+  if (booking.riderNoShow) return 'No-show';
+  return switch (booking.status) {
+    BookingStatus.inProgress => 'In progress',
+    BookingStatus.completed => 'Completed',
+    BookingStatus.payoutHeld => 'Completed',
+    _ => 'Confirmed',
+  };
+}
 
 class _RiderRideAction extends StatelessWidget {
   const _RiderRideAction({
@@ -440,6 +448,10 @@ class _RiderRideAction extends StatelessWidget {
     final current = booking;
     if (current == null) {
       return FilledButton(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+        ),
         onPressed: requesting || ride.seatsAvailable < 1
             ? null
             : AppHaptics.wrap(onRequest),
@@ -541,186 +553,162 @@ class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final ride = widget.ride;
-    final booked = ride.bookedSeats;
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
     return SafeArea(
-      bottom: false,
-      child: Column(
-        children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 17, 24, 24),
-              children: [
-                SizedBox(
-                  height: 86,
+      child: FutureBuilder<List<SeatBooking>>(
+        future: _bookings,
+        builder: (context, snapshot) {
+          final bookings = snapshot.data ?? const <SeatBooking>[];
+          final riders = bookings
+              .where(
+                (booking) => const {
+                  BookingStatus.acceptedPaymentPending,
+                  BookingStatus.paymentProcessing,
+                  BookingStatus.confirmed,
+                  BookingStatus.inProgress,
+                  BookingStatus.completed,
+                }.contains(booking.status),
+              )
+              .toList(growable: false);
+          final completed = bookings
+              .where(
+                (booking) =>
+                    const {
+                      BookingStatus.completed,
+                      BookingStatus.payoutHeld,
+                    }.contains(booking.status) &&
+                    !booking.driverHasRated,
+              )
+              .toList(growable: false);
+          final confirmed = bookings
+              .where((booking) => booking.status == BookingStatus.confirmed)
+              .toList(growable: false);
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 16),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 7, 24, 0),
+                child: SizedBox(
+                  height: 30,
                   child: Stack(
                     alignment: Alignment.topCenter,
                     children: [
-                      Positioned(
-                        left: 0,
-                        top: 2,
+                      Align(
+                        alignment: Alignment.centerLeft,
                         child: IconButton(
                           tooltip: 'Back',
                           padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 24,
+                            height: 30,
+                          ),
                           onPressed: context.pop,
-                          icon: const FinalDraftBackIcon(size: 23),
+                          icon: const FinalDraftBackIcon(size: 30),
                         ),
                       ),
-                      Column(
-                        children: [
-                          Text(
-                            'Your ride',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${formatShortDate(ride.departureAt)} · ${formatTime(ride.departureAt)}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 9),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 17,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.ink,
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                            child: Text(
-                              '$booked/${ride.seatsTotal} booked',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: Colors.white),
-                            ),
-                          ),
-                        ],
+                      Text(
+                        'Your ride',
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: RideMapPreview(mapPreviewUrl: ride.mapPreviewUrl),
+              ),
+              const SizedBox(height: 9),
+              SizedBox(
+                height: 157,
+                child: RideMapPreview(
+                  mapPreviewUrl: ride.mapPreviewUrl,
+                  encodedPolyline: ride.encodedPolyline,
+                  origin: ride.origin,
+                  destination: ride.destination,
+                  showZoomControls: false,
                 ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 116,
-                  child: RideRouteCard(
-                    origin: ride.origin.displayName,
-                    destination: ride.destination.displayName,
-                    originSubtitle: 'Dep ${formatTime(ride.departureAt)}',
-                    destinationSubtitle:
-                        'ETA ${formatTime(ride.departureAt.add(Duration(seconds: ride.durationSeconds)))}',
-                    backgroundColor: AppColors.softSurface,
-                    showBorder: false,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Row(
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: _OwnerRideSummaryCard(ride: ride),
+              ),
+              const SizedBox(height: 23),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 40),
+                child: Row(
                   children: [
                     Expanded(
-                      child: _DetailValue(
-                        label: 'Price / seat',
-                        value: ride.priceLabel,
+                      child: _OwnerDetailLabel(
+                        'Luggage per rider',
+                        ride.luggageAllowance.label,
                       ),
                     ),
                     Expanded(
-                      child: _DetailValue(
-                        label: 'Luggage per rider',
-                        value: ride.luggageAllowance.label,
+                      child: _OwnerDetailLabel(
+                        'Rider preference',
+                        ride.genderRestriction.label,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _DetailValue(
-                        label: 'Rider preference',
-                        value: ride.genderRestriction.label,
-                      ),
-                    ),
-                    if (ride.vehicle.makeAndModel.isNotEmpty)
-                      Expanded(
-                        child: _DetailValue(
-                          label: 'Vehicle',
-                          value: ride.vehicle.makeAndModel,
-                        ),
-                      ),
-                  ],
+              ),
+              const SizedBox(height: 28),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 40),
+                child: _OwnerDetailLabel(
+                  'Vehicle',
+                  ride.vehicle.makeAndModel.isEmpty
+                      ? 'Not provided'
+                      : ride.vehicle.makeAndModel,
                 ),
-                const SizedBox(height: 36),
-                Text(
+              ),
+              const SizedBox(height: 38),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
                   'Your riders',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
-                const SizedBox(height: 12),
-                FutureBuilder<List<SeatBooking>>(
-                  future: _bookings,
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState != ConnectionState.done) {
-                      return const Center(child: CircularProgressIndicator());
-                    }
-                    final riders = (snapshot.data ?? const <SeatBooking>[])
-                        .where(
-                          (booking) => [
-                            BookingStatus.acceptedPaymentPending,
-                            BookingStatus.paymentProcessing,
-                            BookingStatus.confirmed,
-                            BookingStatus.inProgress,
-                            BookingStatus.completed,
-                          ].contains(booking.status),
-                        )
-                        .toList();
-                    if (riders.isEmpty) {
-                      return Text(
-                        'No riders yet.',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      );
-                    }
-                    return Column(
-                      children: [
-                        for (final booking in riders) ...[
-                          _OwnerRiderRow(booking: booking),
-                          const SizedBox(height: 9),
-                        ],
-                      ],
-                    );
-                  },
-                ),
-                if (ride.seatsAvailable > 0) ...[
-                  const SizedBox(height: 8),
-                  CustomPaint(
-                    painter: _DashedRoundedBorderPainter(
-                      color: const Color(0xFFC9C9CE),
-                      radius: 10,
-                    ),
-                    child: SizedBox(
-                      height: 46,
-                      child: Center(
-                        child: Text(
-                          '${ride.seatsAvailable} ${ride.seatsAvailable == 1 ? 'seat' : 'seats'} open — share your ride link',
-                          style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: snapshot.connectionState != ConnectionState.done
+                    ? const SizedBox(
+                        height: 63,
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    : riders.isEmpty
+                    ? Container(
+                        height: 63,
+                        alignment: Alignment.centerLeft,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          border: Border.all(color: AppColors.border),
+                          borderRadius: BorderRadius.circular(12),
                         ),
+                        child: Text(
+                          'No riders yet.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      )
+                    : Column(
+                        children: [
+                          for (final booking in riders) ...[
+                            _OwnerRiderRow(booking: booking),
+                            if (booking != riders.last)
+                              const SizedBox(height: 9),
+                          ],
+                        ],
                       ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Container(
-            padding: EdgeInsets.fromLTRB(24, 10, 24, bottomInset + 12),
-            child: Column(
-              children: [
-                Row(
+              ),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Row(
                   children: [
                     Expanded(
                       child: FilledButton(
                         style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFFFFE2DE),
+                          backgroundColor: AppColors.dangerSurface,
                           foregroundColor: AppColors.danger,
                         ),
                         onPressed: ride.status == 'published'
@@ -736,60 +724,69 @@ class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
                           backgroundColor: AppColors.softSurface,
                           foregroundColor: AppColors.ink,
                         ),
-                        onPressed: ride.shareUrl.isEmpty
-                            ? null
-                            : () => SharePlus.instance.share(
-                                ShareParams(text: ride.shareUrl),
-                              ),
+                        onPressed: () => SharePlus.instance.share(
+                          ShareParams(text: _rideShareText(ride)),
+                        ),
                         child: const Text('Share link'),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                FutureBuilder<List<SeatBooking>>(
-                  future: _bookings,
-                  builder: (context, snapshot) {
-                    final completed = (snapshot.data ?? const <SeatBooking>[])
-                        .where(
-                          (booking) =>
-                              {
-                                BookingStatus.completed,
-                                BookingStatus.payoutHeld,
-                              }.contains(booking.status) &&
-                              !booking.driverHasRated,
-                        )
-                        .toList(growable: false);
-                    final confirmed = (snapshot.data ?? const <SeatBooking>[])
-                        .where(
-                          (booking) =>
-                              booking.status == BookingStatus.confirmed,
-                        )
-                        .toList();
-                    if (completed.isNotEmpty) {
-                      return FilledButton(
+              ),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: completed.isNotEmpty
+                    ? FilledButton(
+                        style: AppButtonStyles.primaryFilled,
                         onPressed: _openingRatings
                             ? null
                             : () => _rateRiders(completed),
                         child: Text(
                           _openingRatings ? 'Opening…' : 'Rate riders',
                         ),
-                      );
-                    }
-                    return FilledButton(
-                      onPressed: confirmed.isEmpty || _startingTrip
-                          ? null
-                          : _startTrip,
-                      child: Text(
-                        _startingTrip ? 'Optimizing route…' : 'Start trip',
+                      )
+                    : FilledButton(
+                        style: AppButtonStyles.primaryFilled,
+                        onPressed: confirmed.isEmpty || _startingTrip
+                            ? null
+                            : _startTrip,
+                        child: Text(
+                          _startingTrip ? 'Optimizing route…' : 'Start trip',
+                        ),
                       ),
-                    );
-                  },
+              ),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.information,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Drivers must carry active auto insurance, wait at least 10 minutes after the agreed pickup time before marking a rider as a no-show, and understand that a 5% platform fee is deducted from each reimbursement.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: AppColors.primary),
+                  ),
                 ),
-              ],
-            ),
-          ),
-        ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                "Start trip when you're ready to head out!\n"
+                "We'll automatically order your stops for the fastest route.",
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -835,37 +832,54 @@ class _OwnerRideDetailsPageState extends ConsumerState<_OwnerRideDetailsPage> {
   }
 }
 
-class _DashedRoundedBorderPainter extends CustomPainter {
-  const _DashedRoundedBorderPainter({
-    required this.color,
-    required this.radius,
-  });
+class _OwnerRideSummaryCard extends StatelessWidget {
+  const _OwnerRideSummaryCard({required this.ride});
 
-  final Color color;
-  final double radius;
+  final Ride ride;
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final path = Path()
-      ..addRRect(
-        RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius)),
-      );
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    for (final metric in path.computeMetrics()) {
-      var distance = 0.0;
-      while (distance < metric.length) {
-        canvas.drawPath(metric.extractPath(distance, distance + 4), paint);
-        distance += 8;
-      }
-    }
-  }
+  Widget build(BuildContext context) => RideSummaryCard(
+    origin: ride.origin.displayName,
+    destination: ride.destination.displayName,
+    dateLabel: formatShortDate(ride.departureAt),
+    timeLabel: formatTime(ride.departureAt),
+    priceLabel: ride.priceLabel,
+    bookedLabel: '${ride.bookedSeats}/${ride.seatsTotal} booked',
+    keyPrefix: 'owner-ride-${ride.id}',
+  );
+}
+
+class _OwnerDetailLabel extends StatelessWidget {
+  const _OwnerDetailLabel(this.label, this.value);
+
+  final String label;
+  final String? value;
 
   @override
-  bool shouldRepaint(covariant _DashedRoundedBorderPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.radius != radius;
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: AppColors.secondaryInk,
+          fontSize: 13,
+        ),
+      ),
+      if (value != null) ...[
+        const SizedBox(height: 5),
+        Text(
+          value!,
+          softWrap: true,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.ink,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    ],
+  );
 }
 
 class _OwnerRiderRow extends ConsumerWidget {
@@ -900,8 +914,7 @@ class _OwnerRiderRow extends ConsumerWidget {
                 children: [
                   Text(
                     booking.riderName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    softWrap: true,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   Text(
@@ -913,10 +926,9 @@ class _OwnerRiderRow extends ConsumerWidget {
                       BookingStatus.inProgress =>
                         'Trip in progress · ${booking.seat.label}',
                       _ =>
-                        '${booking.seat.label} · ${booking.pickupLocation?.displayName ?? 'Pickup code ready'}',
+                        'Pick up: ${booking.pickupLocation?.formattedAddress ?? booking.pickupLocation?.displayName ?? 'Pickup code ready'}',
                     },
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    softWrap: true,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -942,7 +954,12 @@ class _OwnerRiderRow extends ConsumerWidget {
                   }
                 }
               },
-              icon: const Icon(Icons.chat_bubble_outline, size: 20),
+              icon: const FinalDraftIcon(
+                kind: FinalDraftIconKind.messages,
+                selected: false,
+                color: AppColors.ink,
+                size: 22,
+              ),
             ),
           ],
         ),
@@ -1073,7 +1090,7 @@ class _Seat extends StatelessWidget {
             border: taken
                 ? null
                 : Border.all(
-                    color: selected ? AppColors.ink : AppColors.border,
+                    color: selected ? AppColors.primary : AppColors.border,
                     width: selected ? 2 : 1,
                   ),
             borderRadius: BorderRadius.circular(12),
@@ -1174,7 +1191,7 @@ class _SeatRequestSheetState extends State<_SeatRequestSheet> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Both addresses must be within 1 mile of the driver’s route or inside the approved service boundary.',
+            'Both addresses must be within 1 mile of the driver’s route or student housing (Isla Vista / UCSB housing).',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 20),
@@ -1228,8 +1245,7 @@ class _StopPickerButton extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            softWrap: true,
             style: Theme.of(context).textTheme.bodyLarge,
           ),
         ],
@@ -1246,13 +1262,29 @@ class _DetailValue extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 3),
-        Text(value, style: Theme.of(context).textTheme.titleMedium),
-      ],
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: AppColors.secondaryInk,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            softWrap: true,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontSize: 13, height: 1.25),
+          ),
+        ],
+      ),
     );
   }
 }

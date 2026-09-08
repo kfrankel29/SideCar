@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
+import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 class SideCarScaffold extends StatelessWidget {
@@ -64,10 +65,7 @@ class SideCarScaffold extends StatelessWidget {
                           onPressed: AppHaptics.wrap(
                             onBack ?? () => Navigator.maybePop(context),
                           ),
-                          icon: const Icon(
-                            Icons.chevron_left_rounded,
-                            size: 30,
-                          ),
+                          icon: const FinalDraftBackIcon(size: 30),
                         ),
                       ),
                   ],
@@ -182,7 +180,7 @@ class SideCarInfoCard extends StatelessWidget {
     required this.title,
     required this.message,
     super.key,
-    this.icon = Icons.shield_outlined,
+    this.icon,
     this.color = AppColors.information,
   });
 
@@ -204,7 +202,7 @@ class SideCarInfoCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (icon != null) ...[
-              Icon(icon!, size: 23, color: AppColors.ink),
+              Icon(icon!, size: 23, color: AppColors.primary),
               const SizedBox(width: 12),
             ],
             Expanded(

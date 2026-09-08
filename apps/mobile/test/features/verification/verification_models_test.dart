@@ -25,25 +25,17 @@ void main() {
     );
   });
 
-  test('driver requires identity, vehicle, and insurance', () {
+  test('driver requires identity and a complete vehicle', () {
     expect(
       const VerificationSummary(
         identity: VerificationStatus.verified,
-        vehicle: completeVehicle,
-      ).canUseRideFeatures(PrimaryRole.driver),
-      isFalse,
-    );
-    expect(
-      const VerificationSummary(
-        identity: VerificationStatus.verified,
-        insurance: VerificationStatus.verified,
         vehicle: completeVehicle,
       ).canUseRideFeatures(PrimaryRole.driver),
       isTrue,
     );
   });
 
-  test('vehicle validation rejects incomplete or invalid details', () {
+  test('vehicle validation no longer requires an exterior photo', () {
     expect(completeVehicle.isComplete, isTrue);
     expect(
       const VehicleProfile(
@@ -63,7 +55,7 @@ void main() {
         color: 'White',
         licensePlate: '8ABC123',
       ).isComplete,
-      isFalse,
+      isTrue,
     );
   });
 

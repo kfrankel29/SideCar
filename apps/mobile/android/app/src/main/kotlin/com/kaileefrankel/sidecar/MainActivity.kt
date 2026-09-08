@@ -14,10 +14,30 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             "com.kaileefrankel.sidecar/settings",
         ).setMethodCallHandler { call, result ->
+            if (call.method == "requestAppReview") {
+                val marketIntent = Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("market://details?id=$packageName"),
+                )
+                try {
+                    startActivity(marketIntent)
+                } catch (_: Exception) {
+                    startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://play.google.com/store/apps/details?id=$packageName"),
+                        ),
+                    )
+                }
+                result.success(true)
+                return@setMethodCallHandler
+            }
+
             if (call.method != "openAppSettings") {
                 result.notImplemented()
                 return@setMethodCallHandler
             }
+
             val intent = Intent(
                 Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 Uri.parse("package:$packageName"),

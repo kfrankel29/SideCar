@@ -2,11 +2,37 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canRequestGenderRestrictedRide,
+  canMarkRiderNoShow,
+  completedRideReimbursementCents,
+  countsTowardCompletedRideReimbursement,
   calculateCheckoutAmounts,
   recordFailedPickupCodeAttempt,
   refundForRiderCancellation,
   validateRefundTiers,
 } from "./booking_policy.js";
+
+test("a rider can be marked no-show only after the full 10-minute wait", () => {
+  const pickup = Date.UTC(2026, 8, 6, 15, 0);
+  assert.equal(canMarkRiderNoShow(pickup, pickup + 9 * 60_000 + 59_999), false);
+  assert.equal(canMarkRiderNoShow(pickup, pickup + 10 * 60_000), true);
+});
+
+test("only completed rides count toward total reimbursed", () => {
+  assert.equal(countsTowardCompletedRideReimbursement("completed"), true);
+  for (const status of [
+    "confirmed",
+    "in_progress",
+    "cancelled",
+    "refunded",
+    "payout_held",
+  ]) {
+    assert.equal(countsTowardCompletedRideReimbursement(status), false);
+  }
+  assert.equal(completedRideReimbursementCents("completed", 4750, 5000), 4750);
+  assert.equal(completedRideReimbursementCents("completed", undefined, 5000), 5000);
+  assert.equal(completedRideReimbursementCents("cancelled", 4200, 5000), 0);
+  assert.equal(completedRideReimbursementCents("completed", -1, 5000), 0);
+});
 
 test("pickup codes lock after exactly five failed attempts", () => {
   assert.deepEqual(recordFailedPickupCodeAttempt(undefined), {
@@ -41,7 +67,8 @@ test("women-only rides accept only a female rider profile", () => {
 
 const checkoutPolicy = {
   serviceFeeType: "percentage" as const,
-  serviceFeeValue: 8,
+  serviceFeeValue: 5,
+  driverFeePercentage: 5,
   cardRate: 0.029,
   cardFixedCents: 30,
   bankRate: 0.008,
@@ -57,18 +84,54 @@ test("checkout includes the configured service and card processing fees", () => 
   const result = calculateCheckoutAmounts(5_000, checkoutPolicy);
   assert.deepEqual(result, {
     baseFareCents: 5_000,
-    serviceFeeCents: 400,
-    processingFeeCents: 193,
-    totalCents: 5_593,
-    driverPayoutCents: 5_000,
+    serviceFeeCents: 250,
+    driverPlatformFeeCents: 250,
+    processingFeeCents: 188,
+    creditAppliedCents: 0,
+    totalCents: 5_438,
+    driverPayoutCents: 4_750,
   });
 });
 
 test("bank checkout uses the configured percentage without a fixed fee", () => {
   const result = calculateCheckoutAmounts(5_000, checkoutPolicy, "bank");
-  assert.equal(result.serviceFeeCents, 400);
-  assert.equal(result.processingFeeCents, 44);
-  assert.equal(result.totalCents, 5_444);
+  assert.equal(result.serviceFeeCents, 250);
+  assert.equal(result.driverPlatformFeeCents, 250);
+  assert.equal(result.processingFeeCents, 43);
+  assert.equal(result.totalCents, 5_293);
+});
+
+test("zero Stripe percentage produces no rider processing fee", () => {
+  const result = calculateCheckoutAmounts(5_000, {
+    ...checkoutPolicy,
+    cardRate: 0,
+  });
+  assert.deepEqual(result, {
+    baseFareCents: 5_000,
+    serviceFeeCents: 250,
+    driverPlatformFeeCents: 250,
+    processingFeeCents: 0,
+    creditAppliedCents: 0,
+    totalCents: 5_250,
+    driverPayoutCents: 4_750,
+  });
+});
+
+test("ride credit is automatically deducted while preserving Stripe minimum", () => {
+  const result = calculateCheckoutAmounts(5_000, checkoutPolicy, "card", 500);
+  assert.equal(result.creditAppliedCents, 500);
+  assert.equal(result.totalCents, 4_938);
+  assert.equal(result.driverPayoutCents, 4_750);
+
+  const small = calculateCheckoutAmounts(100, {
+    ...checkoutPolicy,
+    serviceFeeValue: 0,
+    cardRate: 0,
+  }, "card", 500);
+  assert.equal(small.creditAppliedCents, 50);
+  assert.equal(small.totalCents, 50);
+  assert.equal(small.driverPlatformFeeCents, 5);
+  assert.equal(small.driverPayoutCents, 95);
 });
 
 test("refund policy selects full, partial, and no-refund tiers", () => {

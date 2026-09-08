@@ -221,10 +221,10 @@ void main() {
     expect(find.text('Make and model'), findsOneWidget);
     expect(find.text('Make'), findsNothing);
     expect(find.text('Model'), findsNothing);
-    expect(find.text('Vehicle photo'), findsOneWidget);
+    expect(find.text('Vehicle photo'), findsNothing);
   });
 
-  testWidgets('vehicle cannot be completed without an exterior photo', (
+  testWidgets('vehicle form does not request an exterior photo', (
     tester,
   ) async {
     const summary = VerificationSummary(
@@ -250,10 +250,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Save vehicle'));
-    await tester.pump();
 
-    expect(find.text('Add a clear exterior vehicle photo.'), findsOneWidget);
+    expect(find.text('Vehicle photo'), findsNothing);
+    expect(find.text('Add a clear exterior vehicle photo.'), findsNothing);
+    expect(find.widgetWithText(FilledButton, 'Save vehicle'), findsOneWidget);
   });
 
   testWidgets('safety acceptance path is available in TestFlight UI', (
@@ -280,7 +280,9 @@ void main() {
     expect(find.text('Safety & reporting'), findsOneWidget);
   });
 
-  testWidgets('verification hub shows the complete Axle label', (tester) async {
+  testWidgets('verification hub removes insurance verification', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(375, 812);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -304,7 +306,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Automatic check through Axle'), findsOneWidget);
+    expect(find.text('Automatic check through Axle'), findsNothing);
+    expect(find.textContaining('insurance', findRichText: true), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

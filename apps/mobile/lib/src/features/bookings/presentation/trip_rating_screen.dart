@@ -85,11 +85,11 @@ class _TripRatingScreenState extends ConsumerState<TripRatingScreen> {
   void _goHome() {
     ref.read(mainTabActivationProvider.notifier).activate(0);
     final router = GoRouter.maybeOf(context);
+    final navigator = Navigator.of(context);
+    navigator.popUntil((route) => route.isFirst);
     if (router != null) {
       router.go(AppRoutes.home);
-      return;
     }
-    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   @override
@@ -235,7 +235,7 @@ class _StarPicker extends StatelessWidget {
             onPressed: () => onChanged(rating),
             icon: Icon(
               rating <= value ? Icons.star : Icons.star_border,
-              color: AppColors.ink,
+              color: AppColors.primary,
               size: 27,
             ),
           ),
@@ -262,8 +262,10 @@ class _FeedbackChip extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
       decoration: BoxDecoration(
-        color: selected ? AppColors.ink : Colors.white,
-        border: Border.all(color: selected ? AppColors.ink : AppColors.border),
+        color: selected ? AppColors.primary : Colors.white,
+        border: Border.all(
+          color: selected ? AppColors.primary : AppColors.border,
+        ),
         borderRadius: BorderRadius.circular(22),
       ),
       child: Text(
@@ -307,6 +309,15 @@ class _RateRidersScreenState extends ConsumerState<RateRidersScreen> {
   final Set<String> _compliments = {};
   bool _submitting = false;
 
+  String get _comment => _compliments.join(' · ');
+
+  void _finish() {
+    ref.read(mainTabActivationProvider.notifier).activate(0);
+    final router = GoRouter.maybeOf(context);
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    if (router != null) router.go(AppRoutes.home);
+  }
+
   Future<void> _submit() async {
     if (_submitting) return;
     if (widget.bookings.any((booking) => (_ratings[booking.id] ?? 0) == 0)) {
@@ -325,13 +336,33 @@ class _RateRidersScreenState extends ConsumerState<RateRidersScreen> {
             .rateRider(
               bookingId: booking.id,
               rating: _ratings[booking.id]!,
-              comment: _compliments.join(' · '),
+              comment: _comment,
             );
       }
       if (!mounted) return;
       showAppNotice(context, 'Thanks for rating your riders.');
-      ref.read(mainTabActivationProvider.notifier).activate(0);
-      Navigator.pop(context, true);
+      _finish();
+    } on AppFailure catch (error) {
+      if (mounted) {
+        showAppNotice(context, error.message, kind: AppNoticeKind.error);
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  Future<void> _skip() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    try {
+      await ref
+          .read(bookingRepositoryProvider)
+          .dismissRiderRatings(
+            widget.bookings
+                .map((booking) => booking.id)
+                .toList(growable: false),
+          );
+      if (mounted) _finish();
     } on AppFailure catch (error) {
       if (mounted) {
         showAppNotice(context, error.message, kind: AppNoticeKind.error);
@@ -375,7 +406,7 @@ class _RateRidersScreenState extends ConsumerState<RateRidersScreen> {
                     child: Column(
                       children: [
                         Text(
-                          'YOU EARNED',
+                          'YOU WERE REIMBURSED',
                           style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(color: Colors.white70),
                         ),
@@ -469,13 +500,20 @@ class _RateRidersScreenState extends ConsumerState<RateRidersScreen> {
                 24,
                 MediaQuery.paddingOf(context).bottom + 12,
               ),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: AppColors.softSurface)),
-              ),
-              child: FilledButton(
-                onPressed: _submitting ? null : _submit,
-                child: Text(_submitting ? 'Submitting…' : 'Done'),
+              decoration: const BoxDecoration(color: AppColors.ivory),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton(
+                    onPressed: _submitting ? null : _submit,
+                    child: Text(_submitting ? 'Submitting…' : 'Done'),
+                  ),
+                  if (_ratings.values.every((rating) => rating == 0))
+                    TextButton(
+                      onPressed: _submitting ? null : _skip,
+                      child: const Text('Skip'),
+                    ),
+                ],
               ),
             ),
           ],

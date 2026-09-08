@@ -137,12 +137,15 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('ride-nav-4')));
     await tester.pumpAndSettle();
+    const logOutKey = ValueKey('profile-log-out');
     await tester.scrollUntilVisible(
-      find.text('Log out'),
+      find.byKey(logOutKey),
       200,
       scrollable: find.byType(Scrollable).last,
     );
-    await tester.tap(find.text('Log out'));
+    await tester.ensureVisible(find.byKey(logOutKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(logOutKey));
     await tester.pumpAndSettle();
 
     expect(auth.signOutCount, 1);
@@ -234,6 +237,11 @@ class _EmptyRideRepository implements RideRepository {
   Future<RideStopPickerContext> getRideStopPickerContext(
     String rideId, {
     String selectedPlaceId = '',
+    List<String> searchPlaceIds = const [],
+    bool includeGasStations = false,
+    String gasStationQuery = '',
+    double? gasStationLatitude,
+    double? gasStationLongitude,
   }) => throw UnimplementedError();
 
   @override
@@ -348,6 +356,8 @@ class _SessionAuthRepository implements AuthRepository {
     required String lastName,
     required String email,
     required String password,
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
   }) => throw UnimplementedError();
 
   @override
@@ -364,7 +374,10 @@ class _SessionAuthRepository implements AuthRepository {
   }) => throw UnimplementedError();
 
   @override
-  Future<AccountUser> signInWithGoogle() => throw UnimplementedError();
+  Future<AccountUser> signInWithGoogle({
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
+  }) => throw UnimplementedError();
 
   @override
   Future<void> signOut() async {

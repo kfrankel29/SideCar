@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -11,13 +12,34 @@ import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/auth/presentation/auth_screens.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
+import 'package:sidecar/src/features/profile/presentation/account_support_screens.dart';
+import 'package:sidecar/src/features/profile/presentation/profile_screens.dart';
 import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
+import 'package:sidecar/src/features/safety/presentation/safety_screens.dart';
 import 'package:sidecar/src/features/verification/domain/verification_models.dart';
 import 'package:sidecar/src/features/verification/domain/verification_repository.dart';
+import 'package:sidecar/src/features/verification/presentation/verification_screens.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  Future<void> capture(String name) async {
+    final bytes = await binding.takeScreenshot(name);
+    final file = File('${Directory.systemTemp.path}/$name.png');
+    await file.writeAsBytes(bytes, flush: true);
+    debugPrint('FINAL_DRAFT_SCREENSHOT=${file.path}');
+    final client = HttpClient();
+    final request = await client.postUrl(
+      Uri.parse('http://127.0.0.1:8766/$name'),
+    );
+    request.contentLength = bytes.length;
+    request.add(bytes);
+    final response = await request.close();
+    await response.drain<void>();
+    client.close(force: true);
+    debugPrint('FINAL_DRAFT_SCREENSHOT_HTTP=$name:${response.statusCode}');
+  }
 
   testWidgets('captures the Milestone 1 and 2 Final Draft routes', (
     tester,
@@ -40,11 +62,16 @@ void main() {
         child: const SideCarApp(),
       ),
     );
-    await tester.pumpAndSettle();
+    // Replace the app's normal launch route before its asynchronous onboarding
+    // continuation can affect a later visual capture.
+    await tester.pump();
 
     final appContext = tester.element(find.byType(MaterialApp));
     final container = ProviderScope.containerOf(appContext);
     final router = container.read(appRouterProvider);
+    router.go('${AppRoutes.opening}?visualQa=true');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
 
     const routes = <String, String>{
       'opening': '${AppRoutes.opening}?visualQa=true',
@@ -65,14 +92,16 @@ void main() {
       'identity-verification': AppRoutes.identityVerification,
       'driver-license': AppRoutes.driverLicense,
       'vehicle-profile': AppRoutes.vehicleProfile,
-      'insurance-verification': AppRoutes.insuranceVerification,
-      'insurance-fallback': AppRoutes.insuranceFallback,
       'verification-complete': AppRoutes.verificationComplete,
       'safety-tools': AppRoutes.safetyTools,
       'block-user': '${AppRoutes.blockUser}?uid=visual-target&name=Jordan',
       'report-user': '${AppRoutes.reportUser}?uid=visual-target&name=Jordan',
       'report-submitted':
           '${AppRoutes.reportUser}?uid=visual-target&name=Jordan',
+      'change-password': AppRoutes.changePassword,
+      'help-faq': AppRoutes.help,
+      'cancellation-policy': AppRoutes.cancellationPolicy,
+      'delete-account': AppRoutes.deleteAccount,
     };
 
     for (final entry in routes.entries) {
@@ -86,12 +115,42 @@ void main() {
         await tester.pumpAndSettle();
       }
       await _applyFinalDraftState(tester, entry.key);
+      expect(_screenFinder(entry.key), findsOneWidget);
       expect(find.textContaining('Milestone'), findsNothing);
       expect(find.textContaining('later approved'), findsNothing);
-      await binding.takeScreenshot(entry.key);
+      await capture(entry.key);
     }
   });
 }
+
+Finder _screenFinder(String screen) => switch (screen) {
+  'opening' => find.byType(OpeningScreen),
+  'welcome' => find.byType(WelcomeScreen),
+  'login' => find.byType(LoginScreen),
+  'sign-up' => find.byType(SignUpScreen),
+  'verify-email' => find.byType(EmailVerificationScreen),
+  'forgot-password' => find.byType(ForgotPasswordScreen),
+  'reset-code' => find.byType(PasswordResetCodeScreen),
+  'new-password' => find.byType(NewPasswordScreen),
+  'password-reset-complete' => find.byType(PasswordResetCompleteScreen),
+  'profile' => find.byType(ProfileSetupScreen),
+  'photo-permission' => find.byType(PhotoPermissionScreen),
+  'onboarded' => find.byType(OnboardedScreen),
+  'profile-gate' => find.byType(ProfileGateScreen),
+  'verification-hub' => find.byType(VerificationHubScreen),
+  'identity-verification' => find.byType(IdentityVerificationScreen),
+  'driver-license' => find.byType(DriverLicenseUploadScreen),
+  'vehicle-profile' => find.byType(VehicleProfileScreen),
+  'verification-complete' => find.byType(VerificationCompleteScreen),
+  'safety-tools' => find.byType(SafetyToolsScreen),
+  'block-user' => find.byType(BlockUserScreen),
+  'report-user' || 'report-submitted' => find.byType(ReportUserScreen),
+  'change-password' => find.byType(ChangePasswordScreen),
+  'help-faq' => find.byType(HelpFaqScreen),
+  'cancellation-policy' => find.byType(CancellationPolicyScreen),
+  'delete-account' => find.byType(DeleteAccountScreen),
+  _ => throw ArgumentError.value(screen, 'screen'),
+};
 
 VerificationSummary _verificationStateFor(String screen) {
   const vehicle = VehicleProfile(
@@ -103,17 +162,12 @@ VerificationSummary _verificationStateFor(String screen) {
     photoUrl: 'visual-qa-vehicle',
   );
   return switch (screen) {
-    'insurance-fallback' => const VerificationSummary(
-      identity: VerificationStatus.verified,
-      insurance: VerificationStatus.requiresAction,
-      vehicle: vehicle,
-    ),
     'verification-complete' => const VerificationSummary(
       identity: VerificationStatus.verified,
       insurance: VerificationStatus.verified,
       vehicle: vehicle,
     ),
-    'vehicle-profile' || 'insurance-verification' => const VerificationSummary(
+    'vehicle-profile' => const VerificationSummary(
       identity: VerificationStatus.verified,
       vehicle: vehicle,
     ),
@@ -180,6 +234,8 @@ class _QaAuthRepository implements AuthRepository {
     required String lastName,
     required String email,
     required String password,
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
   }) async => user;
 
   @override
@@ -198,7 +254,10 @@ class _QaAuthRepository implements AuthRepository {
   }) async => user;
 
   @override
-  Future<AccountUser> signInWithGoogle() async => user;
+  Future<AccountUser> signInWithGoogle({
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
+  }) async => user;
 
   @override
   Future<void> verifyEmailCode(String code) async {}

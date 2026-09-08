@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/core/config/business_config_repository.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
+import 'package:sidecar/src/core/legal/legal_documents.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
 import 'package:sidecar/src/core/widgets/sidecar_scaffold.dart';
+import 'package:sidecar/src/core/widgets/password_field.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
@@ -124,6 +126,7 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.primary,
       body: SafeArea(
         child: Stack(
           children: [
@@ -133,29 +136,19 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
                 children: [
                   Text(
                     'SideCar',
-                    style: Theme.of(context).textTheme.displayMedium,
+                    style: Theme.of(context).textTheme.displayMedium?.copyWith(
+                      color: Colors.white,
+                      fontFamily: 'Georgia',
+                    ),
                   ),
                   const SizedBox(height: 5),
                   Text(
                     'The easy way home.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Colors.white.withValues(alpha: .82),
+                    ),
                   ),
                 ],
-              ),
-            ),
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 30,
-              child: Center(
-                child: SizedBox(
-                  width: 120,
-                  child: LinearProgressIndicator(
-                    minHeight: 2,
-                    backgroundColor: Color(0xFFE4E4E4),
-                    color: AppColors.ink,
-                  ),
-                ),
               ),
             ),
             if (_error != null)
@@ -168,9 +161,14 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
                     Text(
                       _error!,
                       textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(color: Colors.white),
                     ),
                     TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white,
+                      ),
                       onPressed: _continueFromLaunch,
                       child: const Text('Try again'),
                     ),
@@ -202,7 +200,9 @@ class WelcomeScreen extends StatelessWidget {
                 ),
                 child: Text(
                   'SideCar',
-                  style: Theme.of(context).textTheme.headlineLarge,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.headlineLarge?.copyWith(fontFamily: 'Georgia'),
                 ),
               ),
               const SizedBox(height: 109),
@@ -218,6 +218,7 @@ class WelcomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 64),
               FilledButton(
+                style: AppButtonStyles.primaryFilled,
                 onPressed: AppHaptics.wrap(
                   () => context.push(AppRoutes.signUp),
                 ),
@@ -298,12 +299,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _continueWithGoogle() async {
+    final accepted = await showLegalConsentDialog(context);
+    if (!accepted || !mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      await ref.read(authRepositoryProvider).signInWithGoogle();
+      await ref
+          .read(authRepositoryProvider)
+          .signInWithGoogle(acceptedLegalTerms: true, confirmedAge18: true);
       final profile = await ref
           .read(profileRepositoryProvider)
           .loadCurrentProfile();
@@ -352,9 +357,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             const SizedBox(height: 18),
             FormFieldBlock(
               label: 'Password',
-              child: TextFormField(
+              child: PasswordFormField(
                 controller: _password,
-                obscureText: true,
                 autofillHints: const [AutofillHints.password],
                 onFieldSubmitted: (_) => _submit(),
                 validator: (value) => value == null || value.isEmpty
@@ -374,6 +378,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             SideCarErrorText(_error),
             const SizedBox(height: 16),
             FilledButton(
+              style: AppButtonStyles.primaryFilled,
               onPressed: AppHaptics.wrap(_loading ? null : _submit),
               child: Text(_loading ? 'Signing in…' : 'Log in'),
             ),
@@ -418,6 +423,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _loading = false;
+  bool _acceptedLegalTerms = false;
+  bool _confirmedAge18 = false;
   String? _domainError;
   String? _error;
 
@@ -436,6 +443,13 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       _error = null;
     });
     if (!_formKey.currentState!.validate()) return;
+    if (!_acceptedLegalTerms || !_confirmedAge18) {
+      setState(
+        () => _error =
+            'Confirm that you are 18 or older and accept the legal terms.',
+      );
+      return;
+    }
     setState(() => _loading = true);
     try {
       final config = await ref.read(businessConfigRepositoryProvider).refresh();
@@ -450,6 +464,8 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
             lastName: _lastName.text,
             email: _email.text,
             password: _password.text,
+            acceptedLegalTerms: _acceptedLegalTerms,
+            confirmedAge18: _confirmedAge18,
           );
       if (!mounted) return;
       if (!user.emailVerified) {
@@ -551,25 +567,65 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
             const SizedBox(height: 18),
             FormFieldBlock(
               label: 'Password',
-              child: TextFormField(
+              child: PasswordFormField(
                 controller: _password,
-                obscureText: true,
                 onChanged: (_) => setState(() {}),
                 validator: (value) => _passwordError(value ?? ''),
-                decoration: const InputDecoration(hintText: '8+ characters'),
+                hintText: '8+ characters',
               ),
             ),
+            const SizedBox(height: 12),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _confirmedAge18,
+              onChanged: _loading
+                  ? null
+                  : (value) => setState(() {
+                      _confirmedAge18 = value == true;
+                      _error = null;
+                    }),
+              title: const Text('I confirm that I am at least 18 years old.'),
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _acceptedLegalTerms,
+              onChanged: _loading
+                  ? null
+                  : (value) => setState(() {
+                      _acceptedLegalTerms = value == true;
+                      _error = null;
+                    }),
+              title: const Text(
+                'I agree to the Terms of Service and acknowledge the Privacy Policy.',
+              ),
+            ),
+            Wrap(
+              alignment: WrapAlignment.center,
+              children: [
+                TextButton(
+                  onPressed: () => LegalDocuments.open(
+                    context,
+                    LegalDocuments.termsOfService,
+                  ),
+                  child: const Text('Terms of Service'),
+                ),
+                TextButton(
+                  onPressed: () => LegalDocuments.open(
+                    context,
+                    LegalDocuments.privacyPolicy,
+                  ),
+                  child: const Text('Privacy Policy'),
+                ),
+              ],
+            ),
             SideCarErrorText(_error),
-            const SizedBox(height: 45),
+            const SizedBox(height: 24),
             FilledButton(
+              style: AppButtonStyles.primaryFilled,
               onPressed: AppHaptics.wrap(_loading ? null : _submit),
               child: Text(_loading ? 'Creating account…' : 'Continue'),
-            ),
-            const SizedBox(height: 19),
-            Text(
-              'By clicking continue, you agree to the Terms of Service and Privacy Policy.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ),
@@ -767,6 +823,7 @@ class _EmailVerificationScreenState
           SideCarErrorText(_error),
           const SizedBox(height: 20),
           FilledButton(
+            style: AppButtonStyles.primaryFilled,
             onPressed: AppHaptics.wrap(_loading ? null : _verify),
             child: Text(_loading ? 'Verifying…' : 'Verify email'),
           ),
@@ -830,6 +887,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       showBack: true,
       onBack: () => _popOrGo(context, AppRoutes.login),
       bottom: FilledButton(
+        style: AppButtonStyles.primaryFilled,
         onPressed: AppHaptics.wrap(_loading ? null : _submit),
         child: Text(_loading ? 'Sending…' : 'Send reset code'),
       ),
@@ -961,6 +1019,7 @@ class _PasswordResetCodeScreenState
           SideCarErrorText(_error),
           const SizedBox(height: 20),
           FilledButton(
+            style: AppButtonStyles.primaryFilled,
             onPressed: AppHaptics.wrap(_loading ? null : _verify),
             child: Text(_loading ? 'Verifying…' : 'Verify email'),
           ),
@@ -1063,18 +1122,16 @@ class _NewPasswordScreenState extends ConsumerState<NewPasswordScreen> {
             const SizedBox(height: 28),
             FormFieldBlock(
               label: 'New password',
-              child: TextFormField(
+              child: PasswordFormField(
                 controller: _password,
-                obscureText: true,
                 validator: (value) => _passwordError(value ?? ''),
               ),
             ),
             const SizedBox(height: 18),
             FormFieldBlock(
               label: 'Confirm new password',
-              child: TextFormField(
+              child: PasswordFormField(
                 controller: _confirmation,
-                obscureText: true,
                 onChanged: (_) => setState(() {}),
                 validator: (value) =>
                     value != _password.text ? 'Passwords must match.' : null,

@@ -59,6 +59,16 @@
   ],
   "fieldOverrides": [
     {
+      "collectionGroup": "devices",
+      "fieldPath": "token",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
       "collectionGroup": "auth_otps",
       "fieldPath": "expiresAt",
       "ttl": true,

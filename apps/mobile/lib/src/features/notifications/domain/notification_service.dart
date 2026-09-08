@@ -11,6 +11,8 @@ abstract interface class NotificationService {
   Stream<NotificationAction> get updates;
   Future<void> initialize();
   Future<void> refreshRegistration();
+  Future<int> unreadRideUpdateCount();
+  Future<void> markRideUpdatesRead();
 }
 
 class UnavailableNotificationService implements NotificationService {
@@ -27,8 +29,24 @@ class UnavailableNotificationService implements NotificationService {
 
   @override
   Future<void> refreshRegistration() async {}
+
+  @override
+  Future<int> unreadRideUpdateCount() async => 0;
+
+  @override
+  Future<void> markRideUpdatesRead() async {}
 }
 
 final notificationServiceProvider = Provider<NotificationService>(
   (ref) => const UnavailableNotificationService(),
 );
+
+final rideNotificationAttentionProvider = FutureProvider.autoDispose<int>((
+  ref,
+) async {
+  try {
+    return await ref.read(notificationServiceProvider).unreadRideUpdateCount();
+  } on Object {
+    return 0;
+  }
+});

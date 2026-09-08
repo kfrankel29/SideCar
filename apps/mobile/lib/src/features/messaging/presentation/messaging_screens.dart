@@ -10,7 +10,6 @@ import 'package:sidecar/src/features/messaging/domain/conversation_models.dart';
 import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
-import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 class MessageInboxScreen extends ConsumerStatefulWidget {
@@ -62,10 +61,6 @@ class _MessageInboxScreenState extends ConsumerState<MessageInboxScreen> {
                       onChanged: (_) => setState(() {}),
                       decoration: const InputDecoration(
                         hintText: 'Search messages…',
-                        prefixIcon: Icon(
-                          Icons.search,
-                          color: AppColors.mutedInk,
-                        ),
                         filled: true,
                         fillColor: AppColors.softSurface,
                         border: OutlineInputBorder(
@@ -390,7 +385,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                                 ),
                                 decoration: BoxDecoration(
                                   color: item.senderId == uid
-                                      ? AppColors.ink
+                                      ? AppColors.primary
                                       : AppColors.softSurface,
                                   borderRadius: BorderRadius.circular(15),
                                 ),
@@ -475,7 +470,11 @@ class _ChatHeader extends StatelessWidget {
         Expanded(
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
-            onTap: rideId.isEmpty ? null : () => context.push('/rides/$rideId'),
+            onTap: otherUserId.isNotEmpty
+                ? () => context.push('/profiles/$otherUserId')
+                : rideId.isEmpty
+                ? null
+                : () => context.push('/rides/$rideId'),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
               child: Column(
@@ -483,41 +482,16 @@ class _ChatHeader extends StatelessWidget {
                 children: [
                   Text(name, style: Theme.of(context).textTheme.titleMedium),
                   if (subtitle.isNotEmpty)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            subtitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ),
-                        if (rideId.isNotEmpty)
-                          const Icon(Icons.chevron_right_rounded, size: 16),
-                      ],
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                 ],
               ),
             ),
           ),
-        ),
-        PopupMenuButton<String>(
-          onSelected: (value) {
-            final route = value == 'block'
-                ? AppRoutes.blockUser
-                : AppRoutes.reportUser;
-            context.push(
-              Uri(
-                path: route,
-                queryParameters: {'uid': otherUserId, 'name': name},
-              ).toString(),
-            );
-          },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'report', child: Text('Report user')),
-            PopupMenuItem(value: 'block', child: Text('Block user')),
-          ],
         ),
       ],
     ),
@@ -572,7 +546,7 @@ class _Composer extends StatelessWidget {
         IconButton.filled(
           tooltip: 'Send message',
           onPressed: sending ? null : onSend,
-          style: IconButton.styleFrom(backgroundColor: AppColors.ink),
+          style: IconButton.styleFrom(backgroundColor: AppColors.primary),
           icon: sending
               ? const SizedBox(
                   width: 18,
@@ -582,7 +556,7 @@ class _Composer extends StatelessWidget {
                     color: Colors.white,
                   ),
                 )
-              : const Icon(Icons.arrow_upward_rounded, color: Colors.white),
+              : const FinalDraftChevronIcon(size: 18, color: Colors.white),
         ),
       ],
     ),

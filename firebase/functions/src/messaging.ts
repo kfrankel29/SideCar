@@ -3,6 +3,8 @@ import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 import {onDocumentCreated} from "firebase-functions/v2/firestore";
 
+import {conversationDocumentId, conversationPairKey} from "./messaging_policy.js";
+
 if (getApps().length === 0) initializeApp();
 
 const db = getFirestore();
@@ -26,6 +28,13 @@ function text(value: unknown, field: string, maxLength = 200): string {
     throw new HttpsError("invalid-argument", `${field} is invalid.`);
   }
   return normalized;
+}
+
+async function requireActiveUser(uid: string): Promise<void> {
+  const profile = (await db.collection("users").doc(uid).get()).data();
+  if (profile?.accountStatus === "suspended" || profile?.accountStatus === "banned") {
+    throw new HttpsError("permission-denied", "This account is not active.");
+  }
 }
 
 function initials(name: string): string {
@@ -55,7 +64,7 @@ async function ensureConversation(bookingId: string): Promise<string> {
   if (!riderId || !driverId) {
     throw new HttpsError("failed-precondition", "That booking has no participants.");
   }
-  const pairKey = [riderId, driverId].sort().join("::");
+  const pairKey = conversationPairKey(riderId, driverId);
   const [rider, driver, ride, pairConversation, legacyConversations] = await Promise.all([
     db.collection("users").doc(riderId).get(),
     db.collection("users").doc(driverId).get(),
@@ -82,7 +91,7 @@ async function ensureConversation(bookingId: string): Promise<string> {
       return (rightTime?.toMillis() ?? 0) - (leftTime?.toMillis() ?? 0);
     })[0]?.ref;
   const reference = existingReference ?? db.collection("conversations").doc(
-    `pair_${[riderId, driverId].sort().join("_")}`,
+    conversationDocumentId(riderId, driverId),
   );
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
@@ -128,7 +137,7 @@ async function ensureDirectConversation(
   if (await usersBlocked(currentUserId, otherUserId)) {
     throw new HttpsError("permission-denied", "Messages are unavailable for this user.");
   }
-  const pairKey = [currentUserId, otherUserId].sort().join("::");
+  const pairKey = conversationPairKey(currentUserId, otherUserId);
   const [currentSnapshot, otherSnapshot, pairConversation, legacyConversations] = await Promise.all([
     db.collection("users").doc(currentUserId).get(),
     db.collection("users").doc(otherUserId).get(),
@@ -156,7 +165,7 @@ async function ensureDirectConversation(
       return (rightTime?.toMillis() ?? 0) - (leftTime?.toMillis() ?? 0);
     })[0]?.ref;
   const reference = existingReference ?? db.collection("conversations").doc(
-    `pair_${[currentUserId, otherUserId].sort().join("_")}`,
+    conversationDocumentId(currentUserId, otherUserId),
   );
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(reference);
@@ -226,6 +235,7 @@ export const openBookingConversation = onCall(
   {region, enforceAppCheck: true, maxInstances: 60},
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireActiveUser(request.auth.uid);
     const bookingId = text(object(request.data).bookingId, "Booking", 128);
     const booking = (await db.collection("bookings").doc(bookingId).get()).data();
     if (!booking || (booking.riderId !== request.auth.uid && booking.driverId !== request.auth.uid)) {
@@ -240,6 +250,7 @@ export const openDirectConversation = onCall(
   {region, enforceAppCheck: true, maxInstances: 60},
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireActiveUser(request.auth.uid);
     const otherUserId = text(object(request.data).userId, "User", 128);
     const conversationId = await ensureDirectConversation(
       request.auth.uid,
@@ -253,6 +264,7 @@ export const sendRideMessage = onCall(
   {region, enforceAppCheck: true, maxInstances: 80},
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireActiveUser(request.auth.uid);
     const data = object(request.data);
     const conversationId = text(data.conversationId, "Conversation", 128);
     const messageText = text(data.text, "Message", 2_000);
@@ -301,6 +313,7 @@ export const markConversationRead = onCall(
   {region, enforceAppCheck: true, maxInstances: 80},
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireActiveUser(request.auth.uid);
     const conversationId = text(object(request.data).conversationId, "Conversation", 128);
     const {reference, conversation} = await conversationForUser(
       conversationId,

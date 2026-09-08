@@ -1,8 +1,13 @@
 import 'dart:math' as math;
+import 'dart:async';
+import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
+import 'package:sidecar/src/features/rides/domain/encoded_polyline.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
@@ -45,9 +50,9 @@ class RideChoiceChip extends StatelessWidget {
           padding: EdgeInsets.symmetric(horizontal: compact ? 14 : 20),
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: selected ? AppColors.ink : Colors.white,
+            color: selected ? AppColors.primary : Colors.white,
             border: Border.all(
-              color: selected ? AppColors.ink : AppColors.border,
+              color: selected ? AppColors.primary : AppColors.border,
             ),
             borderRadius: BorderRadius.circular(99),
           ),
@@ -79,98 +84,238 @@ class RideCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap == null ? null : AppHaptics.wrap(onTap),
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 96),
-        padding: const EdgeInsets.fromLTRB(12, 11, 13, 10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(
-            color: selected ? AppColors.ink : AppColors.border,
-            width: selected ? 2 : 1,
-          ),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            RideAvatar(
-              initials: ride.driverInitials,
-              photoUrl: ride.driverPhotoUrl,
-              radius: 19,
+    return RideSummaryCard(
+      origin: ride.origin.displayName,
+      destination: ride.destination.displayName,
+      dateLabel: formatShortDate(ride.departureAt),
+      timeLabel: formatTime(ride.departureAt),
+      priceLabel: ride.priceLabel,
+      bookedLabel: '${ride.bookedSeats}/${ride.seatsTotal} booked',
+      profileName: ride.driverName,
+      profileInitials: ride.driverInitials,
+      profilePhotoUrl: ride.driverPhotoUrl,
+      profileRating: ride.driverRating,
+      selected: selected,
+      onTap: onTap,
+      keyPrefix: 'ride-card-${ride.id}',
+    );
+  }
+}
+
+/// The M7 ride-information contract used across home, search, My Rides, and
+/// ride details. It intentionally has no fixed height or ellipsis: long names
+/// and locations wrap and make the card taller while preserving equal spacing.
+class RideSummaryCard extends StatelessWidget {
+  const RideSummaryCard({
+    required this.origin,
+    required this.destination,
+    required this.dateLabel,
+    required this.timeLabel,
+    required this.priceLabel,
+    required this.bookedLabel,
+    super.key,
+    this.profileName,
+    this.profileInitials = '',
+    this.profilePhotoUrl = '',
+    this.profileRating,
+    this.selected = false,
+    this.onTap,
+    this.keyPrefix,
+    this.footer,
+  });
+
+  final String origin;
+  final String destination;
+  final String dateLabel;
+  final String timeLabel;
+  final String priceLabel;
+  final String bookedLabel;
+  final String? profileName;
+  final String profileInitials;
+  final String profilePhotoUrl;
+  final double? profileRating;
+  final bool selected;
+  final VoidCallback? onTap;
+  final String? keyPrefix;
+  final Widget? footer;
+
+  Key? _contentKey(String part) =>
+      keyPrefix == null ? null : ValueKey<String>('$keyPrefix-$part');
+
+  @override
+  Widget build(BuildContext context) {
+    final displayOrigin = abbreviateRidePlaceName(origin);
+    final displayDestination = abbreviateRidePlaceName(destination);
+    const strong = TextStyle(
+      fontFamily: 'Arial',
+      color: AppColors.ink,
+      fontSize: 17,
+      height: 1.2,
+      fontWeight: FontWeight.w700,
+    );
+    const secondary = TextStyle(
+      fontFamily: 'Arial',
+      color: AppColors.secondaryInk,
+      fontSize: 14,
+      height: 1.25,
+      fontWeight: FontWeight.w700,
+    );
+    final hasProfile = profileName?.trim().isNotEmpty == true;
+
+    return Semantics(
+      button: onTap != null,
+      label:
+          '$displayOrigin to $displayDestination, $dateLabel at $timeLabel, '
+          '$priceLabel per seat, $bookedLabel',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap == null ? null : AppHaptics.wrap(onTap),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 15),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(
+              color: selected ? AppColors.primary : AppColors.border,
+              width: selected ? 2 : 1,
             ),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          ride.driverName,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
+                  Expanded(
+                    child: Text(
+                      displayOrigin,
+                      key: _contentKey('origin'),
+                      softWrap: true,
+                      style: strong,
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 14),
+                    child: Text(
+                      '→',
+                      style: TextStyle(
+                        fontFamily: 'Arial',
+                        color: AppColors.secondaryInk,
+                        fontSize: 28,
+                        height: 1,
+                        fontWeight: FontWeight.w700,
                       ),
-                      if (ride.driverRating > 0) ...[
-                        const SizedBox(width: 8),
-                        const Text(
-                          '★',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(width: 3),
-                        Text(
-                          ride.driverRating.toStringAsFixed(1),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Dep ${formatTime(ride.departureAt)} · ${ride.vehicle.makeAndModel}',
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    '${ride.origin.displayName} → ${ride.destination.displayName}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: AppColors.secondaryInk,
-                      fontWeight: FontWeight.w700,
+                  Expanded(
+                    child: Text(
+                      displayDestination,
+                      key: _contentKey('destination'),
+                      textAlign: TextAlign.end,
+                      softWrap: true,
+                      style: strong,
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (ride.genderRestriction != RideGenderRestriction.any)
-                  RideBadge(label: ride.genderRestriction.label),
-                if (ride.genderRestriction != RideGenderRestriction.any)
-                  const SizedBox(height: 5),
-                Text(
-                  ride.priceLabel,
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${ride.seatsAvailable} ${ride.seatsAvailable == 1 ? 'seat' : 'seats'}',
-                  style: Theme.of(context).textTheme.bodySmall,
+              const SizedBox(height: 14),
+              const Divider(height: 1, thickness: 1),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          dateLabel,
+                          key: _contentKey('date'),
+                          softWrap: true,
+                          style: strong,
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          timeLabel,
+                          key: _contentKey('time'),
+                          style: secondary,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 18),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        priceLabel,
+                        key: _contentKey('price'),
+                        style: strong.copyWith(fontSize: 22),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text('per seat', style: secondary),
+                      if (!hasProfile) ...[
+                        const SizedBox(height: 5),
+                        Text(
+                          bookedLabel,
+                          key: _contentKey('booked'),
+                          style: secondary,
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+              if (hasProfile) ...[
+                const SizedBox(height: 14),
+                const Divider(height: 1, thickness: 1),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    RideAvatar(
+                      initials: profileInitials,
+                      photoUrl: profilePhotoUrl,
+                      radius: 21,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            profileName!,
+                            key: _contentKey('profile'),
+                            softWrap: true,
+                            style: strong,
+                          ),
+                          if ((profileRating ?? 0) > 0) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '★ ${(profileRating ?? 0).toStringAsFixed(1)}',
+                              style: secondary,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      bookedLabel,
+                      key: _contentKey('booked'),
+                      textAlign: TextAlign.end,
+                      style: secondary,
+                    ),
+                  ],
                 ),
               ],
-            ),
-          ],
+              if (footer != null) ...[
+                const SizedBox(height: 14),
+                const Divider(height: 1, thickness: 1),
+                const SizedBox(height: 14),
+                footer!,
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -264,6 +409,8 @@ class RideRouteCard extends StatelessWidget {
     this.onDestinationTap,
     this.backgroundColor = Colors.white,
     this.showBorder = true,
+    this.routeMarkerColor = AppColors.primary,
+    this.locationTextStyle,
   });
 
   final String origin;
@@ -277,6 +424,8 @@ class RideRouteCard extends StatelessWidget {
   final VoidCallback? onDestinationTap;
   final Color backgroundColor;
   final bool showBorder;
+  final Color routeMarkerColor;
+  final TextStyle? locationTextStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -303,7 +452,7 @@ class RideRouteCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: Colors.white,
                       shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.ink, width: 2),
+                      border: Border.all(color: routeMarkerColor, width: 2),
                     ),
                   ),
                   Expanded(
@@ -312,7 +461,7 @@ class RideRouteCard extends StatelessWidget {
                       child: const SizedBox(width: 1),
                     ),
                   ),
-                  const CircleAvatar(radius: 6, backgroundColor: AppColors.ink),
+                  CircleAvatar(radius: 6, backgroundColor: routeMarkerColor),
                 ],
               ),
             ),
@@ -332,6 +481,7 @@ class RideRouteCard extends StatelessWidget {
                           title: origin,
                           placeholder: originPlaceholder,
                           subtitle: originSubtitle,
+                          textStyle: locationTextStyle,
                         ),
                       ),
                     ),
@@ -348,6 +498,7 @@ class RideRouteCard extends StatelessWidget {
                           title: destination,
                           placeholder: destinationPlaceholder,
                           subtitle: destinationSubtitle,
+                          textStyle: locationTextStyle,
                         ),
                       ),
                     ),
@@ -367,11 +518,13 @@ class _RouteLocationText extends StatelessWidget {
     required this.title,
     required this.placeholder,
     this.subtitle,
+    this.textStyle,
   });
 
   final String title;
   final String placeholder;
   final String? subtitle;
+  final TextStyle? textStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -381,52 +534,218 @@ class _RouteLocationText extends StatelessWidget {
       children: [
         Text(
           title.trim().isEmpty ? placeholder : title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          softWrap: true,
           style: title.trim().isEmpty
-              ? Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: AppColors.secondaryInk)
-              : Theme.of(context).textTheme.titleMedium,
+              ? (textStyle ?? Theme.of(context).textTheme.bodyMedium)?.copyWith(
+                  color: AppColors.secondaryInk,
+                  height: 1.1,
+                )
+              : (textStyle ?? Theme.of(context).textTheme.titleMedium)
+                    ?.copyWith(height: 1.1),
         ),
         if (subtitle != null)
           Text(
             subtitle!,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall,
+            softWrap: true,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.1),
           ),
       ],
     );
   }
 }
 
-class RideMapPreview extends StatelessWidget {
+class RideMapPreview extends StatefulWidget {
   const RideMapPreview({
     super.key,
     this.mapPreviewUrl = '',
+    this.encodedPolyline = '',
+    this.origin,
+    this.destination,
     this.topExtension = 0,
+    this.showZoomControls = true,
   });
 
   final String mapPreviewUrl;
+  final String encodedPolyline;
+  final RideLocation? origin;
+  final RideLocation? destination;
   final double topExtension;
+  final bool showZoomControls;
+
+  @override
+  State<RideMapPreview> createState() => _RideMapPreviewState();
+}
+
+class _RideMapPreviewState extends State<RideMapPreview> {
+  GoogleMapController? _controller;
+
+  List<LatLng> get _route {
+    try {
+      return decodeEncodedPolyline(
+        widget.encodedPolyline,
+      ).map((point) => LatLng(point.latitude, point.longitude)).toList();
+    } on FormatException {
+      return const [];
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fitRoute(List<LatLng> route) async {
+    final controller = _controller;
+    if (controller == null || route.isEmpty) return;
+    // Android can invoke onMapCreated before the platform view has a non-zero
+    // layout. Waiting for that first layout avoids newLatLngBounds throwing.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (!mounted || controller != _controller) return;
+    try {
+      if (route.length == 1) {
+        await controller.animateCamera(
+          CameraUpdate.newLatLngZoom(route.first, 13),
+        );
+        return;
+      }
+      var minLatitude = route.first.latitude;
+      var maxLatitude = minLatitude;
+      var minLongitude = route.first.longitude;
+      var maxLongitude = minLongitude;
+      for (final point in route.skip(1)) {
+        minLatitude = math.min(minLatitude, point.latitude);
+        maxLatitude = math.max(maxLatitude, point.latitude);
+        minLongitude = math.min(minLongitude, point.longitude);
+        maxLongitude = math.max(maxLongitude, point.longitude);
+      }
+      await controller.animateCamera(
+        CameraUpdate.newLatLngBounds(
+          LatLngBounds(
+            southwest: LatLng(minLatitude, minLongitude),
+            northeast: LatLng(maxLatitude, maxLongitude),
+          ),
+          36,
+        ),
+      );
+    } on PlatformException {
+      // A rapidly dismissed map can still disappear between layout and the
+      // native camera update. The initial route camera remains a safe fallback.
+    }
+  }
+
+  Future<void> _zoom(bool zoomIn) async {
+    final controller = _controller;
+    if (controller == null) return;
+    await controller.animateCamera(
+      zoomIn ? CameraUpdate.zoomIn() : CameraUpdate.zoomOut(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final route = _route;
     return RepaintBoundary(
       child: LayoutBuilder(
         builder: (context, constraints) {
           final routeMapHeight = constraints.maxWidth * 252 / 640;
           return SizedBox(
-            height: routeMapHeight + topExtension,
-            child: mapPreviewUrl.trim().isEmpty
+            height: routeMapHeight + widget.topExtension,
+            child: route.length >= 2 && (Platform.isIOS || Platform.isAndroid)
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      GoogleMap(
+                        key: const ValueKey('interactive-ride-route-map'),
+                        initialCameraPosition: CameraPosition(
+                          target: route.first,
+                          zoom: 10,
+                        ),
+                        polylines: {
+                          Polyline(
+                            polylineId: const PolylineId('ride-route'),
+                            points: route,
+                            color: AppColors.primary,
+                            width: 5,
+                          ),
+                        },
+                        markers: {
+                          Marker(
+                            markerId: const MarkerId('route-origin'),
+                            position: route.first,
+                            infoWindow: InfoWindow(
+                              title: widget.origin?.displayName ?? 'Departure',
+                            ),
+                          ),
+                          Marker(
+                            markerId: const MarkerId('route-destination'),
+                            position: route.last,
+                            infoWindow: InfoWindow(
+                              title:
+                                  widget.destination?.displayName ??
+                                  'Destination',
+                            ),
+                          ),
+                        },
+                        compassEnabled: true,
+                        mapToolbarEnabled: false,
+                        myLocationButtonEnabled: false,
+                        rotateGesturesEnabled: true,
+                        scrollGesturesEnabled: true,
+                        tiltGesturesEnabled: true,
+                        zoomControlsEnabled: false,
+                        zoomGesturesEnabled: true,
+                        onMapCreated: (controller) {
+                          _controller = controller;
+                          unawaited(_fitRoute(route));
+                        },
+                      ),
+                      if (widget.showZoomControls)
+                        Positioned(
+                          right: 10,
+                          bottom: 10,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x22000000),
+                                  blurRadius: 8,
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: 'Zoom in',
+                                  onPressed: () => _zoom(true),
+                                  icon: const Icon(Icons.add),
+                                ),
+                                const SizedBox(
+                                  width: 34,
+                                  child: Divider(height: 1),
+                                ),
+                                IconButton(
+                                  tooltip: 'Zoom out',
+                                  onPressed: () => _zoom(false),
+                                  icon: const Icon(Icons.remove),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  )
+                : widget.mapPreviewUrl.trim().isEmpty
                 ? const _MapUnavailablePlaceholder()
                 : Semantics(
                     image: true,
                     label: 'Ride route map',
                     child: CachedNetworkImage(
-                      imageUrl: mapPreviewUrl,
-                      cacheKey: mapPreviewUrl,
+                      imageUrl: widget.mapPreviewUrl,
+                      cacheKey: widget.mapPreviewUrl,
                       fit: BoxFit.cover,
                       fadeInDuration: Duration.zero,
                       fadeOutDuration: Duration.zero,
@@ -536,11 +855,25 @@ String formatShortDate(DateTime value) {
     'Nov',
     'Dec',
   ];
-  return '${weekdays[value.weekday - 1]} ${months[value.month - 1]} ${value.day}';
+  return '${weekdays[value.weekday - 1]}, ${months[value.month - 1]} ${value.day}';
+}
+
+String formatMonthDay(DateTime value) => '${value.month}/${value.day}';
+
+String abbreviateRidePlaceName(String value) {
+  final normalized = value.trim();
+  if (RegExp(
+    r'(?:university of california[,-]?|uc)\s*santa barbara',
+    caseSensitive: false,
+  ).hasMatch(normalized)) {
+    return 'UCSB';
+  }
+  return normalized;
 }
 
 String routeName(Ride ride) =>
-    '${ride.origin.displayName} → ${ride.destination.displayName}';
+    '${abbreviateRidePlaceName(ride.origin.displayName)} → '
+    '${abbreviateRidePlaceName(ride.destination.displayName)}';
 
 double estimateEarnings(int cents, int seats) =>
     math.max(0, cents * seats / 100);

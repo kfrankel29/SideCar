@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,8 +12,10 @@ import 'package:sidecar/src/features/navigation/domain/tab_activation.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/features/messaging/presentation/messaging_screens.dart';
 import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart';
+import 'package:sidecar/src/features/notifications/domain/notification_service.dart';
 import 'package:sidecar/src/features/rides/presentation/driver_ride_screens.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_search_screens.dart';
+import 'package:sidecar/src/theme/app_theme.dart';
 
 class MainTabShell extends ConsumerWidget {
   const MainTabShell({required this.navigationShell, super.key});
@@ -35,24 +39,41 @@ class MainTabShell extends ConsumerWidget {
     final pendingRequests = role == PrimaryRole.driver
         ? ref.watch(driverPendingRequestCountProvider).value ?? 0
         : 0;
+    final unreadRideUpdates =
+        ref.watch(rideNotificationAttentionProvider).value ?? 0;
     return Scaffold(
       body: navigationShell,
-      bottomNavigationBar: MainBottomNavigation(
-        role: role,
-        unreadMessages: unreadMessages,
-        pendingRequests: pendingRequests,
-        selectedIndex: navigationShell.currentIndex,
-        onSelected: (index) {
-          AppHaptics.tap();
-          if (role == PrimaryRole.driver && index == 2) {
-            ref.invalidate(driverPendingRequestCountProvider);
-          }
-          ref.read(mainTabActivationProvider.notifier).activate(index);
-          navigationShell.goBranch(
-            index,
-            initialLocation: index == navigationShell.currentIndex,
-          );
-        },
+      bottomNavigationBar: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.only(bottom: 6),
+        child: MainBottomNavigation(
+          role: role,
+          unreadMessages: unreadMessages,
+          pendingRequests: pendingRequests,
+          unreadRideUpdates: unreadRideUpdates,
+          selectedIndex: navigationShell.currentIndex,
+          onSelected: (index) {
+            AppHaptics.tap();
+            if (role == PrimaryRole.driver && index == 2) {
+              ref.invalidate(driverPendingRequestCountProvider);
+            }
+            if (index == 2) {
+              unawaited(
+                ref
+                    .read(notificationServiceProvider)
+                    .markRideUpdatesRead()
+                    .whenComplete(
+                      () => ref.invalidate(rideNotificationAttentionProvider),
+                    ),
+              );
+            }
+            ref.read(mainTabActivationProvider.notifier).activate(index);
+            navigationShell.goBranch(
+              index,
+              initialLocation: index == navigationShell.currentIndex,
+            );
+          },
+        ),
       ),
     );
   }
@@ -65,6 +86,7 @@ class MainBottomNavigation extends StatelessWidget {
     required this.onSelected,
     this.unreadMessages = 0,
     this.pendingRequests = 0,
+    this.unreadRideUpdates = 0,
     super.key,
   });
 
@@ -73,9 +95,13 @@ class MainBottomNavigation extends StatelessWidget {
   final ValueChanged<int> onSelected;
   final int unreadMessages;
   final int pendingRequests;
+  final int unreadRideUpdates;
 
   @override
   Widget build(BuildContext context) {
+    final ridesAttentionCount = pendingRequests > unreadRideUpdates
+        ? pendingRequests
+        : unreadRideUpdates;
     final icons = <FinalDraftIconKind>[
       FinalDraftIconKind.home,
       role == PrimaryRole.driver
@@ -93,91 +119,99 @@ class MainBottomNavigation extends StatelessWidget {
       'Profile',
     ];
 
-    final bottomInset = MediaQuery.paddingOf(context).bottom;
     return DecoratedBox(
       decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFECECEE))),
+        color: AppColors.ivory,
+        border: Border(top: BorderSide(color: AppColors.border)),
       ),
       child: SizedBox(
-        height: 55 + bottomInset,
-        child: Padding(
-          padding: EdgeInsets.only(bottom: bottomInset),
-          child: Row(
-            children: List.generate(labels.length, (index) {
-              final selected = selectedIndex == index;
-              return Expanded(
-                child: Semantics(
-                  selected: selected,
-                  button: true,
-                  label: labels[index],
-                  child: InkResponse(
-                    key: ValueKey('ride-nav-$index'),
-                    onTap: () => onSelected(index),
-                    radius: 28,
-                    child: Center(
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          FinalDraftIcon(
-                            kind: icons[index],
-                            selected: selected,
-                          ),
-                          if (index == 3 && unreadMessages > 0)
-                            Positioned(
-                              right: -8,
-                              top: -7,
-                              child: Container(
-                                constraints: const BoxConstraints(minWidth: 17),
-                                height: 17,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                ),
-                                alignment: Alignment.center,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFFE14942),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Text(
-                                  unreadMessages > 9 ? '9+' : '$unreadMessages',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+        height: 65,
+        child: Row(
+          children: List.generate(labels.length, (index) {
+            final selected = selectedIndex == index;
+            return Expanded(
+              child: Semantics(
+                selected: selected,
+                button: true,
+                label: labels[index],
+                child: InkResponse(
+                  key: ValueKey('ride-nav-$index'),
+                  onTap: () => onSelected(index),
+                  radius: 28,
+                  child: Center(
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        FinalDraftIcon(kind: icons[index], selected: selected),
+                        if (index == 3 && unreadMessages > 0)
+                          Positioned(
+                            right: -8,
+                            top: -7,
+                            child: Container(
+                              constraints: const BoxConstraints(minWidth: 17),
+                              height: 17,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              alignment: Alignment.center,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFE14942),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                unreadMessages > 9 ? '9+' : '$unreadMessages',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                             ),
-                          if (index == 2 && pendingRequests > 0)
-                            const Positioned(
-                              right: -6,
-                              top: -5,
-                              child: _NavigationAttentionDot(),
+                          ),
+                        if (index == 2 && ridesAttentionCount > 0)
+                          Positioned(
+                            right: -8,
+                            top: -7,
+                            child: _NavigationCountBadge(
+                              key: const ValueKey('my-rides-update-count'),
+                              count: ridesAttentionCount,
                             ),
-                        ],
-                      ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
-              );
-            }),
-          ),
+              ),
+            );
+          }),
         ),
       ),
     );
   }
 }
 
-class _NavigationAttentionDot extends StatelessWidget {
-  const _NavigationAttentionDot();
+class _NavigationCountBadge extends StatelessWidget {
+  const _NavigationCountBadge({required this.count, super.key});
+
+  final int count;
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 8,
-    height: 8,
+    constraints: const BoxConstraints(minWidth: 17),
+    height: 17,
+    padding: const EdgeInsets.symmetric(horizontal: 4),
+    alignment: Alignment.center,
     decoration: const BoxDecoration(
       color: Color(0xFFE14942),
       shape: BoxShape.circle,
+    ),
+    child: Text(
+      count > 9 ? '9+' : '$count',
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+      ),
     ),
   );
 }

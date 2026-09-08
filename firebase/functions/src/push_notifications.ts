@@ -7,7 +7,11 @@ import {onDocumentCreated} from "firebase-functions/v2/firestore";
 import {onCall, HttpsError} from "firebase-functions/v2/https";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 
-import {notificationCopy} from "./notification_content.js";
+import {
+  isRideUpdateNotification,
+  notificationCopy,
+} from "./notification_content.js";
+import {dueTripReminderMinutes} from "./reminder_schedule.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -38,6 +42,13 @@ function tokenId(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+async function requireActiveUser(uid: string): Promise<void> {
+  const profile = (await db.collection("users").doc(uid).get()).data();
+  if (profile?.accountStatus === "suspended" || profile?.accountStatus === "banned") {
+    throw new HttpsError("permission-denied", "This account is not active.");
+  }
+}
+
 function stringData(value: unknown): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
@@ -51,6 +62,7 @@ export const registerPushToken = onCall(
   {region, enforceAppCheck: true, maxInstances: 80},
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireActiveUser(request.auth.uid);
     const data = object(request.data);
     const token = text(data.token, "Push token");
     const platform = text(data.platform, "Platform", 20);
@@ -59,11 +71,19 @@ export const registerPushToken = onCall(
     }
     const currentReference = db.collection("users").doc(request.auth.uid)
       .collection("devices").doc(tokenId(token));
-    const existingOwners = await db.collectionGroup("devices")
-      .where("token", "==", token).limit(20).get();
     const writes = db.batch();
-    for (const document of existingOwners.docs) {
-      if (document.ref.path !== currentReference.path) writes.delete(document.ref);
+    try {
+      const existingOwners = await db.collectionGroup("devices")
+        .where("token", "==", token).limit(20).get();
+      for (const document of existingOwners.docs) {
+        if (document.ref.path !== currentReference.path) writes.delete(document.ref);
+      }
+    } catch (error) {
+      if ((error as {code?: number}).code !== 9) throw error;
+      logger.warn("Device-token owner cleanup is waiting for its Firestore index.", {
+        userId: request.auth.uid,
+        platform,
+      });
     }
     writes.set(currentReference, {
         token,
@@ -81,6 +101,7 @@ export const unregisterPushToken = onCall(
   {region, enforceAppCheck: true, maxInstances: 80},
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireActiveUser(request.auth.uid);
     const token = text(object(request.data).token, "Push token");
     await db.collection("users").doc(request.auth.uid)
       .collection("devices").doc(tokenId(token)).delete();
@@ -88,11 +109,65 @@ export const unregisterPushToken = onCall(
   },
 );
 
+export const getRideNotificationState = onCall(
+  {region, enforceAppCheck: true, maxInstances: 80},
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireActiveUser(request.auth.uid);
+    const snapshot = await db.collection("notifications")
+      .where("userId", "==", request.auth.uid)
+      .where("read", "==", false)
+      .limit(100)
+      .get();
+    const unreadCount = snapshot.docs.filter((document) =>
+      isRideUpdateNotification(String(document.data().type ?? "")),
+    ).length;
+    return {unreadCount};
+  },
+);
+
+export const markRideNotificationsRead = onCall(
+  {region, enforceAppCheck: true, maxInstances: 80},
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireActiveUser(request.auth.uid);
+    const snapshot = await db.collection("notifications")
+      .where("userId", "==", request.auth.uid)
+      .where("read", "==", false)
+      .limit(500)
+      .get();
+    const unreadRideUpdates = snapshot.docs.filter((document) =>
+      isRideUpdateNotification(String(document.data().type ?? "")),
+    );
+    if (unreadRideUpdates.length > 0) {
+      const batch = db.batch();
+      for (const document of unreadRideUpdates) {
+        batch.update(document.ref, {
+          read: true,
+          readAt: FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
+    return {markedRead: unreadRideUpdates.length};
+  },
+);
+
 export const deliverPushNotification = onDocumentCreated(
-  {region, document: "notifications/{notificationId}", maxInstances: 80},
+  {
+    region,
+    document: "notifications/{notificationId}",
+    maxInstances: 80,
+    retry: true,
+  },
   async (event) => {
-    const notification = event.data?.data();
-    if (!notification) return;
+    const notificationSnapshot = event.data;
+    const notification = notificationSnapshot?.data();
+    if (!notificationSnapshot || !notification) return;
+    const currentStatus = String(
+      (await notificationSnapshot.ref.get()).data()?.pushStatus ?? "",
+    );
+    if (["delivered", "partial", "no_devices"].includes(currentStatus)) return;
     const userId = String(notification.userId ?? "");
     const type = String(notification.type ?? "");
     if (!userId || !type) return;
@@ -101,21 +176,55 @@ export const deliverPushNotification = onDocumentCreated(
     const tokens = devices.docs.map((document) => String(document.data().token ?? ""))
       .filter(Boolean);
     if (tokens.length === 0) {
-      await event.data?.ref.update({pushStatus: "no_devices"});
+      await notificationSnapshot.ref.update({pushStatus: "no_devices"});
+      logger.warn("Push notification has no active recipient devices.", {
+        notificationId: event.params.notificationId,
+        userId,
+        type,
+      });
       return;
     }
     const data = stringData(notification.data);
     const copy = notificationCopy(type, data);
-    const response = await getMessaging().sendEachForMulticast({
-      tokens,
-      notification: {title: copy.title, body: copy.body},
-      data: {...data, type, route: copy.route, notificationId: event.params.notificationId},
-      android: {priority: "high", notification: {channelId: "sidecar_activity"}},
-      apns: {
-        headers: {"apns-priority": "10"},
-        payload: {aps: {sound: "default", badge: 1, contentAvailable: true}},
-      },
+    await notificationSnapshot.ref.update({
+      pushStatus: "sending",
+      pushAttemptCount: FieldValue.increment(1),
+      pushLastAttemptAt: FieldValue.serverTimestamp(),
     });
+    let response;
+    try {
+      response = await getMessaging().sendEachForMulticast({
+        tokens,
+        notification: {title: copy.title, body: copy.body},
+        data: {...data, type, route: copy.route, notificationId: event.params.notificationId},
+        android: {
+          collapseKey: event.params.notificationId,
+          priority: "high",
+          notification: {channelId: "sidecar_activity"},
+        },
+        apns: {
+          headers: {
+            "apns-collapse-id": event.params.notificationId,
+            "apns-priority": "10",
+            "apns-push-type": "alert",
+          },
+          payload: {aps: {sound: "default", badge: 1, contentAvailable: true}},
+        },
+      });
+    } catch (error) {
+      await notificationSnapshot.ref.update({
+        pushStatus: "failed",
+        pushFailureReason: error instanceof Error ? error.message.slice(0, 500) : "Unknown push error",
+        pushFailedAt: FieldValue.serverTimestamp(),
+      });
+      logger.error("Push delivery failed before FCM accepted the message.", {
+        notificationId: event.params.notificationId,
+        userId,
+        type,
+        error,
+      });
+      throw error;
+    }
     const invalid = new Set([
       "messaging/registration-token-not-registered",
       "messaging/invalid-registration-token",
@@ -128,11 +237,23 @@ export const deliverPushNotification = onDocumentCreated(
           invalidatedAt: FieldValue.serverTimestamp(),
         }, {merge: true});
     }));
-    await event.data?.ref.update({
-      pushStatus: response.failureCount === 0 ? "delivered" : "partial",
+    const failureCodes = [...new Set(response.responses
+      .flatMap((result) => result.error?.code ? [result.error.code] : []))];
+    await notificationSnapshot.ref.update({
+      pushStatus: response.successCount === 0 ? "failed" :
+        response.failureCount === 0 ? "delivered" : "partial",
       pushSuccessCount: response.successCount,
       pushFailureCount: response.failureCount,
+      pushFailureCodes: failureCodes,
       pushDeliveredAt: FieldValue.serverTimestamp(),
+    });
+    logger.info("Push delivery completed.", {
+      notificationId: event.params.notificationId,
+      userId,
+      type,
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      failureCodes,
     });
   },
 );
@@ -143,6 +264,7 @@ async function createReminder(params: {
   type: string;
   bookingId: string;
   rideId: string;
+  reminderMinutes?: number;
 }): Promise<void> {
   const reference = db.collection("notifications").doc(params.key);
   await db.runTransaction(async (transaction) => {
@@ -150,7 +272,11 @@ async function createReminder(params: {
     transaction.create(reference, {
       userId: params.userId,
       type: params.type,
-      data: {bookingId: params.bookingId, rideId: params.rideId},
+      data: {
+        bookingId: params.bookingId,
+        rideId: params.rideId,
+        ...(params.reminderMinutes ? {reminderMinutes: params.reminderMinutes} : {}),
+      },
       read: false,
       createdAt: FieldValue.serverTimestamp(),
     });
@@ -158,7 +284,7 @@ async function createReminder(params: {
 }
 
 export const sendTripReminders = onSchedule(
-  {region, schedule: "every 15 minutes", timeZone: "UTC", maxInstances: 1},
+  {region, schedule: "every 5 minutes", timeZone: "UTC", maxInstances: 1},
   async () => {
     const now = Date.now();
     const snapshot = await db.collection("bookings")
@@ -168,31 +294,25 @@ export const sendTripReminders = onSchedule(
     const jobs: Array<Promise<void>> = [];
     for (const document of snapshot.docs) {
       const booking = document.data();
-      if (!new Set(["confirmed", "in_progress"]).has(String(booking.status))) continue;
+      if (String(booking.status) !== "confirmed") continue;
       const departureAt = booking.departureAt as Timestamp;
       const minutes = (departureAt.toMillis() - now) / 60_000;
       const riderId = String(booking.riderId ?? "");
       const driverId = String(booking.driverId ?? "");
       const rideId = String(booking.rideId ?? "");
-      if (minutes > 23 * 60 && minutes <= 25 * 60) {
+      for (const reminderMinutes of dueTripReminderMinutes(minutes)) {
         for (const userId of [riderId, driverId].filter(Boolean)) {
           jobs.push(createReminder({
-            key: createHash("sha256").update(`trip_reminder:${document.id}:${userId}`).digest("hex"),
+            key: createHash("sha256")
+              .update(`trip_reminder:${reminderMinutes}:${document.id}:${userId}`)
+              .digest("hex"),
             userId,
             type: "trip_reminder",
             bookingId: document.id,
             rideId,
+            reminderMinutes,
           }));
         }
-      }
-      if (minutes > 15 && minutes <= 45 && riderId) {
-        jobs.push(createReminder({
-          key: createHash("sha256").update(`pickup_code_reminder:${document.id}:${riderId}`).digest("hex"),
-          userId: riderId,
-          type: "pickup_code_reminder",
-          bookingId: document.id,
-          rideId,
-        }));
       }
     }
     await Promise.all(jobs);

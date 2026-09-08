@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
+import 'package:sidecar/src/core/legal/legal_documents.dart';
 import 'package:sidecar/src/features/auth/data/auth_error_mapper.dart';
 import 'package:sidecar/src/features/auth/domain/account_user.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
@@ -63,6 +64,8 @@ class FirebaseAuthRepository implements AuthRepository {
     required String lastName,
     required String email,
     required String password,
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
     var recoveringExistingAccount = false;
@@ -73,6 +76,9 @@ class FirebaseAuthRepository implements AuthRepository {
           'lastName': lastName.trim(),
           'email': normalizedEmail,
           'password': password,
+          'acceptedLegalTerms': acceptedLegalTerms,
+          'confirmedAge18': confirmedAge18,
+          'legalVersion': LegalDocuments.version,
         });
       } on FirebaseFunctionsException catch (error) {
         if (error.code != 'already-exists') rethrow;
@@ -132,7 +138,10 @@ class FirebaseAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AccountUser> signInWithGoogle() async {
+  Future<AccountUser> signInWithGoogle({
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
+  }) async {
     try {
       await _initializeGoogleSignIn();
       final googleUser = await GoogleSignIn.instance.authenticate();
@@ -143,7 +152,11 @@ class FirebaseAuthRepository implements AuthRepository {
       final result = await _auth.signInWithCredential(credential);
       await result.user?.getIdToken(true);
       try {
-        await _functions.httpsCallable('completeGoogleStudentSignIn').call();
+        await _functions.httpsCallable('completeGoogleStudentSignIn').call({
+          'acceptedLegalTerms': acceptedLegalTerms,
+          'confirmedAge18': confirmedAge18,
+          'legalVersion': LegalDocuments.version,
+        });
       } on Object {
         await _auth.signOut();
         rethrow;
@@ -322,6 +335,8 @@ class UnavailableAuthRepository implements AuthRepository {
     required String lastName,
     required String email,
     required String password,
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
   }) async => _notReady();
 
   @override
@@ -337,7 +352,10 @@ class UnavailableAuthRepository implements AuthRepository {
   }) async => _notReady();
 
   @override
-  Future<AccountUser> signInWithGoogle() async => _notReady();
+  Future<AccountUser> signInWithGoogle({
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
+  }) async => _notReady();
 
   @override
   Future<void> signOut() async {}

@@ -124,8 +124,11 @@ class _BlockedUserRowState extends ConsumerState<_BlockedUserRow> {
             ),
           ),
           SizedBox(
-            width: 92,
+            width: 104,
             child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
               onPressed: AppHaptics.wrap(_saving ? null : _unblock),
               child: Text(_saving ? 'Wait…' : 'Unblock'),
             ),
@@ -398,7 +401,7 @@ class _ReasonTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? AppColors.softSurface : Colors.white,
           border: Border.all(
-            color: selected ? AppColors.ink : AppColors.border,
+            color: selected ? AppColors.primary : AppColors.border,
           ),
           borderRadius: BorderRadius.circular(10),
         ),

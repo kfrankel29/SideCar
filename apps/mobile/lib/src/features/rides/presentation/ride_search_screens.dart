@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
+import 'package:sidecar/src/core/widgets/app_notice.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
@@ -11,11 +13,11 @@ import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.d
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
-class SearchRidesScreen extends StatefulWidget {
+class SearchRidesScreen extends ConsumerStatefulWidget {
   const SearchRidesScreen({super.key});
 
   @override
-  State<SearchRidesScreen> createState() => _SearchRidesScreenState();
+  ConsumerState<SearchRidesScreen> createState() => _SearchRidesScreenState();
 }
 
 class LeavingSoonScreen extends ConsumerStatefulWidget {
@@ -125,16 +127,17 @@ class _RefreshableResultsMessage extends StatelessWidget {
   }
 }
 
-class _SearchRidesScreenState extends State<SearchRidesScreen> {
+class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
   String _origin = '';
   String _destination = '';
   RidePlacePrediction? _originPlace;
   RidePlacePrediction? _destinationPlace;
   DateTime _date = DateUtils.dateOnly(DateTime.now());
+  bool _dateWasPicked = false;
   bool _womenOnly = false;
-  LuggageAllowance? _luggage;
+  bool _extraLuggage = false;
+  bool _topRated = false;
   String? _language;
-  double _minimumRating = 0;
   String? _error;
 
   Future<void> _pickOrigin() async {
@@ -174,31 +177,12 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
       firstDate: DateUtils.dateOnly(DateTime.now()),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
-    if (value != null && mounted) setState(() => _date = value);
-  }
-
-  Future<void> _pickLuggage() async {
-    if (_luggage != null) {
-      setState(() => _luggage = null);
-      return;
+    if (value != null && mounted) {
+      setState(() {
+        _date = value;
+        _dateWasPicked = true;
+      });
     }
-    final value = await showModalBottomSheet<LuggageAllowance>(
-      context: context,
-      useSafeArea: true,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final allowance in LuggageAllowance.values)
-              ListTile(
-                title: Text(allowance.label),
-                onTap: () => Navigator.pop(context, allowance),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (value != null && mounted) setState(() => _luggage = value);
   }
 
   Future<void> _pickLanguage() async {
@@ -249,8 +233,11 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
           ? DriverGenderFilter.women
           : DriverGenderFilter.any,
       driverLanguage: _language ?? '',
-      luggageRequired: _luggage ?? LuggageAllowance.backpack,
-      minimumRating: _minimumRating,
+      luggageRequired: _extraLuggage
+          ? LuggageAllowance.twoPlusBags
+          : LuggageAllowance.backpack,
+      minimumRating: _topRated ? 4.8 : 0,
+      sort: RideSort.soonest,
     );
     context.push(AppRoutes.searchResults, extra: criteria);
   }
@@ -283,23 +270,40 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
                 const SizedBox(height: 27),
                 const _SectionLabel('When'),
                 const SizedBox(height: 11),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: _pickDate,
-                    icon: const Icon(Icons.calendar_month_outlined, size: 18),
-                    label: Text(formatShortDate(_date)),
+                InkWell(
+                  onTap: _pickDate,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    height: 55,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.calendar_today_outlined,
+                          color: AppColors.primary,
+                          size: 21,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _dateWasPicked
+                              ? formatShortDate(_date)
+                              : 'Select date',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 26),
-                const _SectionLabel('Ride with'),
-                const SizedBox(height: 11),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 13, 10, 13),
                   decoration: BoxDecoration(
+                    color: Colors.white,
                     border: Border.all(color: AppColors.border),
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -313,15 +317,17 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
                               'Women only',
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
+                            const SizedBox(height: 2),
                             Text(
-                              'Show rides offered by women drivers',
+                              'Only women drivers will appear',
                               style: Theme.of(context).textTheme.bodySmall,
                             ),
                           ],
                         ),
                       ),
-                      Switch.adaptive(
+                      Switch(
                         value: _womenOnly,
+                        activeTrackColor: AppColors.primary,
                         onChanged: (value) =>
                             setState(() => _womenOnly = value),
                       ),
@@ -336,24 +342,22 @@ class _SearchRidesScreenState extends State<SearchRidesScreen> {
                   child: Row(
                     children: [
                       RideChoiceChip(
-                        label: 'Luggage',
-                        selected: _luggage != null,
-                        onTap: _pickLuggage,
-                      ),
-                      const SizedBox(width: 8),
-                      RideChoiceChip(
-                        label: 'Language',
-                        selected: _language != null,
-                        onTap: _pickLanguage,
+                        label: '2+ bags',
+                        selected: _extraLuggage,
+                        onTap: () =>
+                            setState(() => _extraLuggage = !_extraLuggage),
                       ),
                       const SizedBox(width: 8),
                       RideChoiceChip(
                         label: '4.8+ rating',
-                        selected: _minimumRating == 4.8,
-                        onTap: () => setState(
-                          () =>
-                              _minimumRating = _minimumRating == 4.8 ? 0 : 4.8,
-                        ),
+                        selected: _topRated,
+                        onTap: () => setState(() => _topRated = !_topRated),
+                      ),
+                      const SizedBox(width: 8),
+                      RideChoiceChip(
+                        label: _language ?? 'Language',
+                        selected: _language != null,
+                        onTap: _pickLanguage,
                       ),
                     ],
                   ),
@@ -397,6 +401,8 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
   late Future<List<Ride>> _rides;
   int? _resultCount;
   bool _showingClosest = false;
+  bool _savingAlert = false;
+  RideSort _sort = RideSort.soonest;
 
   @override
   void initState() {
@@ -408,6 +414,7 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
   void _load() {
     _resultCount = null;
     _showingClosest = false;
+    _criteria = _criteria.copyWith(sort: _sort);
     final request = ref.read(rideRepositoryProvider).searchRides(_criteria);
     _rides = request;
     request.then((rides) {
@@ -424,6 +431,33 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
     }, onError: (_) {});
   }
 
+  Future<void> _saveAlert() async {
+    if (_savingAlert) return;
+    setState(() => _savingAlert = true);
+    try {
+      final similarDates = _criteria.forSimilarDateAlert();
+      await FirebaseFunctions.instanceFor(
+        region: 'us-central1',
+      ).httpsCallable('createRideSearchAlert').call(similarDates.toJson());
+      if (mounted) {
+        showAppNotice(
+          context,
+          'Notification set. We will let you know when a matching ride is posted.',
+        );
+      }
+    } on FirebaseFunctionsException catch (error) {
+      if (mounted) {
+        showAppNotice(
+          context,
+          error.message ?? 'We could not set that notification.',
+          kind: AppNoticeKind.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingAlert = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -438,6 +472,33 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
                 subtitle:
                     '${_showingClosest ? 'Closest available' : formatShortDate(_criteria.startAt)}${_resultCount == null ? '' : ' · $_resultCount ${_resultCount == 1 ? 'ride' : 'rides'}'}',
                 onBack: context.pop,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  for (final sort in const [
+                    RideSort.soonest,
+                    RideSort.topRated,
+                  ]) ...[
+                    Expanded(
+                      child: RideChoiceChip(
+                        label: sort.label,
+                        selected: _sort == sort,
+                        onTap: () {
+                          if (_sort == sort) return;
+                          setState(() {
+                            _sort = sort;
+                            _load();
+                          });
+                        },
+                      ),
+                    ),
+                    if (sort != RideSort.topRated) const SizedBox(width: 8),
+                  ],
+                ],
               ),
             ),
             const SizedBox(height: 14),
@@ -464,16 +525,41 @@ class _SearchResultsScreenState extends ConsumerState<SearchResultsScreen> {
                       title: 'No rides match these filters.',
                       action: 'Change search',
                       onTap: context.pop,
+                      secondaryAction: _savingAlert
+                          ? 'Saving notification…'
+                          : 'Notify me when one is posted',
+                      onSecondaryTap: _savingAlert ? null : _saveAlert,
                     );
                   }
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
-                    itemCount: rides.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) => RideCard(
-                      ride: rides[index],
-                      onTap: () => context.push('/rides/${rides[index].id}'),
-                    ),
+                  return Column(
+                    children: [
+                      if (_showingClosest)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+                          child: OutlinedButton.icon(
+                            onPressed: _savingAlert ? null : _saveAlert,
+                            icon: const Icon(Icons.notifications_outlined),
+                            label: Text(
+                              _savingAlert
+                                  ? 'Saving notification…'
+                                  : 'Notify me for this and similar dates',
+                            ),
+                          ),
+                        ),
+                      Expanded(
+                        child: ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
+                          itemCount: rides.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, index) => RideCard(
+                            ride: rides[index],
+                            onTap: () =>
+                                context.push('/rides/${rides[index].id}'),
+                          ),
+                        ),
+                      ),
+                    ],
                   );
                 },
               ),
@@ -498,43 +584,43 @@ class _CenteredHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: subtitle == null ? 42 : 55,
-      child: Stack(
-        alignment: Alignment.topCenter,
+    return ConstrainedBox(
+      constraints: BoxConstraints(minHeight: subtitle == null ? 42 : 55),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (onBack != null)
-            Align(
-              alignment: Alignment.topLeft,
+            SizedBox(
+              width: 38,
               child: IconButton(
                 tooltip: 'Back',
                 padding: EdgeInsets.zero,
                 onPressed: onBack,
-                icon: const FinalDraftBackIcon(size: 24),
+                icon: const FinalDraftBackIcon(size: 30),
               ),
-            ),
-          Positioned.fill(
-            left: onBack == null ? 0 : 38,
-            right: onBack == null ? 0 : 38,
+            )
+          else
+            const SizedBox(width: 38),
+          Expanded(
             child: Column(
               children: [
                 Text(
                   title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
+                  softWrap: true,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 if (subtitle != null)
                   Text(
                     subtitle!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    softWrap: true,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
               ],
             ),
           ),
+          const SizedBox(width: 38),
         ],
       ),
     );
@@ -557,11 +643,15 @@ class _ResultsMessage extends StatelessWidget {
     required this.title,
     required this.action,
     required this.onTap,
+    this.secondaryAction,
+    this.onSecondaryTap,
   });
 
   final String title;
   final String action;
   final VoidCallback onTap;
+  final String? secondaryAction;
+  final VoidCallback? onSecondaryTap;
 
   @override
   Widget build(BuildContext context) {
@@ -574,6 +664,14 @@ class _ResultsMessage extends StatelessWidget {
             Text(title, textAlign: TextAlign.center),
             const SizedBox(height: 10),
             TextButton(onPressed: onTap, child: Text(action)),
+            if (secondaryAction != null) ...[
+              const SizedBox(height: 6),
+              FilledButton.icon(
+                onPressed: onSecondaryTap,
+                icon: const Icon(Icons.notifications_outlined),
+                label: Text(secondaryAction!),
+              ),
+            ],
           ],
         ),
       ),

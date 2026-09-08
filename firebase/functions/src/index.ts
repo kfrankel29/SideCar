@@ -16,9 +16,11 @@ import {
   stripeIdentityStatusForEvent,
 } from "./stripe_identity.js";
 import {authEmailEnvelope, defaultAuthEmailSender} from "./auth_email.js";
+import {parseLegalAcceptance} from "./legal_consent.js";
 
 export {
   cancelRide,
+  createRideSearchAlert,
   createRide,
   getRide,
   getRideStopPickerContext,
@@ -32,7 +34,11 @@ export {
   updateRide,
 } from "./rides.js";
 
-export {getLiveTrip, startLiveTrip} from "./live_trips.js";
+export {
+  getLiveTrip,
+  refreshLiveTripOnPickup,
+  startLiveTrip,
+} from "./live_trips.js";
 
 export {
   createConversationForBooking,
@@ -44,6 +50,8 @@ export {
 
 export {
   deliverPushNotification,
+  getRideNotificationState,
+  markRideNotificationsRead,
   registerPushToken,
   sendTripReminders,
   unregisterPushToken,
@@ -64,8 +72,10 @@ export {
   listMyBookings,
   listPaymentMethods,
   listRideRequests,
+  markRiderNoShow,
   quoteBookingPayment,
   dismissTripRating,
+  dismissRiderRatings,
   rateCompletedTrip,
   rateCompletedTrip as submitTripRating,
   rateRider,
@@ -79,6 +89,26 @@ export {
 } from "./bookings.js";
 
 export {getPublicProfile} from "./public_profiles.js";
+
+export {getReferralCode, redeemReferralCode} from "./referrals.js";
+
+export {requestAccountDeletion} from "./account_security.js";
+
+export {
+  adminCompleteFirstLogin,
+  adminDeleteUserAccount,
+  adminGetConfig,
+  adminGetInsuranceDocument,
+  adminGetOverview,
+  adminInsuranceDocument,
+  adminListRecords,
+  adminListUsers,
+  adminReviewInsurance,
+  adminSetUserStatus,
+  adminVerifyUserEmail,
+  adminUpdateUserProfile,
+  adminUpdateConfig,
+} from "./admin_tools.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -298,6 +328,15 @@ export const createStudentAccount = onCall(
     const lastName = text(data.lastName, "Last name", 80);
     const email = normalizeEmail(data.email);
     const password = validatePassword(data.password);
+    let legalAcceptance;
+    try {
+      legalAcceptance = parseLegalAcceptance(data);
+    } catch {
+      throw new HttpsError(
+        "failed-precondition",
+        "Confirm that you are 18 or older and accept the legal terms.",
+      );
+    }
     await assertAllowedSchoolEmail(email);
 
     let uid: string | undefined;
@@ -324,6 +363,11 @@ export const createStudentAccount = onCall(
         graduationYear: 0,
         photoUrl: "",
         profileComplete: false,
+        legalAcceptance: {
+          ...legalAcceptance,
+          confirmedAge18: true,
+          acceptedAt: FieldValue.serverTimestamp(),
+        },
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -371,6 +415,17 @@ export const completeGoogleStudentSignIn = onCall(
     const reference = db.collection("users").doc(user.uid);
     const existing = await reference.get();
     if (!existing.exists) {
+      let legalAcceptance;
+      try {
+        legalAcceptance = parseLegalAcceptance(
+          (request.data ?? {}) as Record<string, unknown>,
+        );
+      } catch {
+        throw new HttpsError(
+          "failed-precondition",
+          "Confirm that you are 18 or older and accept the legal terms.",
+        );
+      }
       await reference.set({
         firstName,
         lastName,
@@ -385,6 +440,11 @@ export const completeGoogleStudentSignIn = onCall(
         graduationYear: 0,
         photoUrl: user.photoURL ?? "",
         profileComplete: false,
+        legalAcceptance: {
+          ...legalAcceptance,
+          confirmedAge18: true,
+          acceptedAt: FieldValue.serverTimestamp(),
+        },
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });

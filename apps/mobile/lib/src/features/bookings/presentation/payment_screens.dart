@@ -125,6 +125,11 @@ class _BookingCheckoutScreenState extends ConsumerState<BookingCheckoutScreen> {
                       label: 'Stripe fee',
                       value: quote.label(quote.processingFeeCents),
                     ),
+                    if (quote.creditAppliedCents > 0)
+                      _AmountRow(
+                        label: 'Ride credit',
+                        value: '-${quote.label(quote.creditAppliedCents)}',
+                      ),
                     const Divider(height: 24),
                     _AmountRow(
                       label: 'Total',
@@ -329,7 +334,8 @@ class _PayoutMethodsScreenState extends ConsumerState<PayoutMethodsScreen> {
               else
                 const _InfoPanel(
                   title: 'Secure Stripe payouts',
-                  body: 'Connect a bank account to receive ride earnings.',
+                  body:
+                      'Connect a bank account to receive ride reimbursements.',
                 ),
               const SizedBox(height: 14),
               FilledButton(
@@ -566,7 +572,7 @@ class _PaymentChoiceTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
         decoration: BoxDecoration(
           border: Border.all(
-            color: selected ? AppColors.ink : AppColors.border,
+            color: selected ? AppColors.primary : AppColors.border,
             width: selected ? 1.5 : 1,
           ),
           borderRadius: BorderRadius.circular(10),

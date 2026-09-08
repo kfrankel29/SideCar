@@ -44,8 +44,7 @@ class VehicleProfile {
       make.trim().isNotEmpty &&
       model.trim().isNotEmpty &&
       color.trim().isNotEmpty &&
-      licensePlate.trim().isNotEmpty &&
-      photoUrl.trim().isNotEmpty;
+      licensePlate.trim().isNotEmpty;
 
   factory VehicleProfile.fromJson(Map<String, dynamic> json) {
     return VehicleProfile(
@@ -91,7 +90,7 @@ class VerificationSummary {
   bool canUseRideFeatures(PrimaryRole role) {
     if (!identityComplete) return false;
     if (role == PrimaryRole.rider) return true;
-    return insuranceComplete && vehicleComplete;
+    return vehicleComplete;
   }
 
   factory VerificationSummary.fromJson(

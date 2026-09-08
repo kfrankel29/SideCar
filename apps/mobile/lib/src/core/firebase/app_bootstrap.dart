@@ -67,6 +67,10 @@ final appBootstrapProvider = Provider<AppBootstrapResult>(
 class AppBootstrap {
   const AppBootstrap._();
 
+  static const _appCheckDebugToken = String.fromEnvironment(
+    'SIDECAR_APP_CHECK_DEBUG_TOKEN',
+  );
+
   static Future<AppBootstrapResult> initialize() async {
     try {
       if (kIsWeb && !FirebaseRuntimeOptions.isConfigured) {
@@ -82,10 +86,18 @@ class AppBootstrap {
         await FirebaseAppCheck.instance.activate(
           providerAndroid: kReleaseMode
               ? const AndroidPlayIntegrityProvider()
-              : const AndroidDebugProvider(),
+              : AndroidDebugProvider(
+                  debugToken: _appCheckDebugToken.isEmpty
+                      ? null
+                      : _appCheckDebugToken,
+                ),
           providerApple: kReleaseMode
               ? const AppleAppAttestWithDeviceCheckFallbackProvider()
-              : const AppleDebugProvider(),
+              : AppleDebugProvider(
+                  debugToken: _appCheckDebugToken.isEmpty
+                      ? null
+                      : _appCheckDebugToken,
+                ),
         );
       } on Object catch (error) {
         appCheckError = error;
@@ -117,7 +129,7 @@ class AppBootstrap {
           FirebaseStorage.instance,
           functions,
         ),
-        rideRepository: FirebaseRideRepository(functions),
+        rideRepository: FirebaseRideRepository(functions, auth: auth),
         bookingRepository: FirebaseBookingRepository(functions),
         messagingRepository: FirebaseMessagingRepository(
           auth,

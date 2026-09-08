@@ -1,15 +1,18 @@
 import 'dart:async';
 
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:sidecar/src/core/data/async_ttl_cache.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 
 class FirebaseRideRepository implements RideRepository {
-  FirebaseRideRepository(this._functions);
+  FirebaseRideRepository(this._functions, {FirebaseAuth? auth})
+    : _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseFunctions _functions;
+  final FirebaseAuth _auth;
   static const _timeout = Duration(seconds: 30);
   static const _placeCacheDuration = Duration(minutes: 2);
   static const _rideCacheDuration = Duration(seconds: 20);
@@ -45,10 +48,23 @@ class FirebaseRideRepository implements RideRepository {
   Future<RideStopPickerContext> getRideStopPickerContext(
     String rideId, {
     String selectedPlaceId = '',
+    List<String> searchPlaceIds = const [],
+    bool includeGasStations = false,
+    String gasStationQuery = '',
+    double? gasStationLatitude,
+    double? gasStationLongitude,
   }) async {
     final data = await _call('getRideStopPickerContext', {
       'rideId': rideId,
       if (selectedPlaceId.isNotEmpty) 'selectedPlaceId': selectedPlaceId,
+      if (searchPlaceIds.isNotEmpty) 'searchPlaceIds': searchPlaceIds,
+      if (includeGasStations) 'includeGasStations': true,
+      if (gasStationQuery.trim().isNotEmpty)
+        'gasStationQuery': gasStationQuery.trim(),
+      if (gasStationLatitude != null && gasStationLongitude != null) ...{
+        'gasStationLatitude': gasStationLatitude,
+        'gasStationLongitude': gasStationLongitude,
+      },
     });
     return RideStopPickerContext.fromJson(data);
   }
@@ -171,12 +187,24 @@ class FirebaseRideRepository implements RideRepository {
     Map<String, Object?> payload,
   ) async {
     try {
-      final result = await _functions
-          .httpsCallable(functionName)
-          .call<Map<String, dynamic>>(payload)
-          .timeout(_timeout);
-      return result.data;
+      return await _callOnce(functionName, payload);
     } on FirebaseFunctionsException catch (error) {
+      if (error.code == 'unauthenticated') {
+        final user = _auth.currentUser;
+        if (user != null) {
+          try {
+            await user.getIdToken(true);
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            return await _callOnce(functionName, payload);
+          } on FirebaseFunctionsException catch (retryError) {
+            throw AppFailure(
+              retryError.message ??
+                  'We could not complete that ride request. Try again.',
+              code: retryError.code,
+            );
+          }
+        }
+      }
       throw AppFailure(
         error.message ?? 'We could not complete that ride request. Try again.',
         code: error.code,
@@ -187,6 +215,17 @@ class FirebaseRideRepository implements RideRepository {
         code: 'timeout',
       );
     }
+  }
+
+  Future<Map<String, dynamic>> _callOnce(
+    String functionName,
+    Map<String, Object?> payload,
+  ) async {
+    final result = await _functions
+        .httpsCallable(functionName)
+        .call<Map<String, dynamic>>(payload)
+        .timeout(_timeout);
+    return result.data;
   }
 }
 
@@ -214,6 +253,11 @@ class UnavailableRideRepository implements RideRepository {
   Future<RideStopPickerContext> getRideStopPickerContext(
     String rideId, {
     String selectedPlaceId = '',
+    List<String> searchPlaceIds = const [],
+    bool includeGasStations = false,
+    String gasStationQuery = '',
+    double? gasStationLatitude,
+    double? gasStationLongitude,
   }) async => _notReady();
 
   @override

@@ -2,13 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
+import 'package:sidecar/src/core/legal/legal_documents.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
+import 'package:sidecar/src/core/platform/app_review.dart';
+import 'package:sidecar/src/core/widgets/app_notice.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/bookings/presentation/payment_screens.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
+import 'package:sidecar/src/features/profile/presentation/account_support_screens.dart';
+import 'package:sidecar/src/features/profile/presentation/referral_screen.dart';
 import 'package:sidecar/src/features/verification/domain/verification_repository.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
@@ -108,6 +113,31 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
     if (mounted) context.go(AppRoutes.welcome);
   }
 
+  Future<void> _contactSupport() async {
+    final opened = await launchUrl(
+      Uri(
+        scheme: 'mailto',
+        path: 'hi@ride-sidecar.com',
+        queryParameters: const {'subject': 'SideCar support'},
+      ),
+    );
+    if (!opened && mounted) {
+      Navigator.of(
+        context,
+      ).push<void>(MaterialPageRoute(builder: (_) => const HelpFaqScreen()));
+    }
+  }
+
+  Future<void> _requestReview() async {
+    final requested = await AppReview.request();
+    if (!requested && mounted) {
+      showAppNotice(
+        context,
+        'Rating is unavailable right now. Try again later.',
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final profileState = ref.watch(currentProfileProvider);
@@ -127,7 +157,7 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
           const SizedBox(height: 24),
           _ProfileHeader(profile: profile),
           const SizedBox(height: 18),
-          _ProfileStats(profile: profile),
+          _ProfileStats(profile: profile, role: role),
           const SizedBox(height: 24),
           Text('Use SideCar as', style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 10),
@@ -147,8 +177,7 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
               _ProfileRow(
                 icon: Icons.person_outline_rounded,
                 title: 'Personal information',
-                subtitle:
-                    '${profile.age} · ${profile.gender} · ${profile.language}',
+                subtitle: '${profile.age} · ${profile.gender}',
                 onTap: () => context.push(AppRoutes.profile),
               ),
               _ProfileRow(
@@ -157,10 +186,20 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
                 subtitle: verified ? 'Complete' : 'Action required',
                 onTap: () => context.push(AppRoutes.verification),
               ),
+              _ProfileRow(
+                icon: Icons.lock_outline_rounded,
+                title: 'Change password',
+                subtitle: 'Update your account password',
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => const ChangePasswordScreen(),
+                  ),
+                ),
+              ),
               if (role == PrimaryRole.driver)
                 _ProfileRow(
                   icon: Icons.directions_car_outlined,
-                  title: 'Vehicle and insurance',
+                  title: 'Vehicle',
                   subtitle:
                       verification?.vehicle?.makeAndModel.isNotEmpty == true
                       ? verification!.vehicle!.makeAndModel
@@ -215,7 +254,7 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
                 _ProfileRow(
                   icon: Icons.receipt_long_outlined,
                   title: 'Payout history',
-                  subtitle: 'Completed ride earnings',
+                  subtitle: 'Completed ride reimbursements',
                   onTap: () => Navigator.of(context).push<void>(
                     MaterialPageRoute(
                       builder: (_) => const PayoutHistoryScreen(),
@@ -234,15 +273,56 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
                 subtitle: 'Review and unblock accounts',
                 onTap: () => context.push(AppRoutes.safetyTools),
               ),
-              const _ProfileRow(
+              _ProfileRow(
+                icon: Icons.card_giftcard_outlined,
+                title: 'Invite & earn',
+                subtitle: 'Give \$5, get \$5',
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(builder: (_) => const ReferralScreen()),
+                ),
+              ),
+              _ProfileRow(
                 icon: Icons.help_outline_rounded,
-                title: 'Help and support',
-                subtitle: 'Frequently asked questions',
+                title: 'Contact support',
+                subtitle: 'Get help from the SideCar team',
+                onTap: _contactSupport,
+              ),
+              _ProfileRow(
+                icon: Icons.star_outline_rounded,
+                title: 'Rate SideCar',
+                subtitle: 'Share your App Store feedback',
+                onTap: _requestReview,
+              ),
+              _ProfileRow(
+                icon: Icons.privacy_tip_outlined,
+                title: 'Privacy Policy',
+                subtitle: 'How SideCar handles your information',
+                onTap: () =>
+                    LegalDocuments.open(context, LegalDocuments.privacyPolicy),
+              ),
+              _ProfileRow(
+                icon: Icons.description_outlined,
+                title: 'Terms of Service',
+                subtitle: 'Rules for using SideCar',
+                onTap: () =>
+                    LegalDocuments.open(context, LegalDocuments.termsOfService),
+              ),
+              _ProfileRow(
+                icon: Icons.delete_outline_rounded,
+                title: 'Delete account',
+                subtitle: 'Permanently delete your SideCar account',
+                danger: true,
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => const DeleteAccountScreen(),
+                  ),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 22),
           OutlinedButton.icon(
+            key: const ValueKey('profile-log-out'),
             onPressed: AppHaptics.wrap(_signOut),
             icon: const Icon(Icons.logout_rounded),
             label: const Text('Log out'),
@@ -278,7 +358,7 @@ class _ProfileHeader extends StatelessWidget {
               ),
               const SizedBox(height: 3),
               Text(
-                '${profile.age} yrs · ${profile.gender} · ${profile.language}',
+                '${profile.age} yrs · ${profile.gender}',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -289,35 +369,163 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-class _ProfileStats extends StatelessWidget {
-  const _ProfileStats({required this.profile});
+class _RoleSelector extends StatelessWidget {
+  const _RoleSelector({
+    required this.role,
+    required this.enabled,
+    required this.onSelected,
+  });
 
-  final UserProfile profile;
+  final PrimaryRole role;
+  final bool enabled;
+  final ValueChanged<PrimaryRole> onSelected;
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.softSurface,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          for (final option in PrimaryRole.values)
+            Expanded(
+              child: InkWell(
+                onTap: enabled
+                    ? AppHaptics.wrap(() => onSelected(option))
+                    : null,
+                borderRadius: BorderRadius.circular(11),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  height: 46,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: role == option
+                        ? AppColors.primary
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Text(
+                    option == PrimaryRole.driver ? 'Driver' : 'Rider',
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: role == option ? Colors.white : AppColors.ink,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileSection extends StatelessWidget {
+  const _ProfileSection({required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 9),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            children: [
+              for (var index = 0; index < children.length; index++) ...[
+                children[index],
+                if (index < children.length - 1)
+                  const Divider(height: 1, indent: 58),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProfileRow extends StatelessWidget {
+  const _ProfileRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.onTap,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? AppColors.danger : AppColors.ink;
+    return ListTile(
+      onTap: onTap == null ? null : AppHaptics.wrap(onTap),
+      leading: Icon(icon, color: color),
+      title: Text(
+        title,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(color: color),
+      ),
+      subtitle: Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+      trailing: onTap == null
+          ? null
+          : const Icon(Icons.chevron_right_rounded, color: AppColors.mutedInk),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+    );
+  }
+}
+
+class _ProfileStats extends StatelessWidget {
+  const _ProfileStats({required this.profile, required this.role});
+
+  final UserProfile profile;
+  final PrimaryRole role;
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = role == PrimaryRole.driver
+        ? [
+            (
+              profile.rating > 0 ? profile.rating.toStringAsFixed(1) : '—',
+              'Rating',
+            ),
+            ('${profile.tripCount}', 'Trips'),
+            (_money(profile.totalEarningsCents), 'Total reimbursed'),
+          ]
+        : [
+            (
+              profile.rating > 0 ? profile.rating.toStringAsFixed(1) : '—',
+              'Rating',
+            ),
+            ('${profile.tripCount}', 'Trips'),
+            (_money(profile.creditCents), 'Credit'),
+          ];
     return Row(
       children: [
-        Expanded(
-          child: _ProfileStatCard(
-            value: profile.rating > 0 ? profile.rating.toStringAsFixed(1) : '—',
-            label: 'Rating',
+        for (var index = 0; index < stats.length; index++) ...[
+          Expanded(
+            child: _ProfileStatCard(
+              value: stats[index].$1,
+              label: stats[index].$2,
+            ),
           ),
-        ),
-        const SizedBox(width: 9),
-        Expanded(
-          child: _ProfileStatCard(
-            value: '${profile.tripCount}',
-            label: 'Trips',
-          ),
-        ),
-        const SizedBox(width: 9),
-        Expanded(
-          child: _ProfileStatCard(
-            value: _money(profile.creditCents),
-            label: 'Credit',
-          ),
-        ),
+          if (index < stats.length - 1) const SizedBox(width: 9),
+        ],
       ],
     );
   }
@@ -342,6 +550,7 @@ class _ProfileStatCard extends StatelessWidget {
       height: 70,
       alignment: Alignment.center,
       decoration: BoxDecoration(
+        color: Colors.white,
         border: Border.all(color: AppColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -382,118 +591,6 @@ class _ProfileAvatar extends StatelessWidget {
                 errorBuilder: (_, _, _) => fallback,
               ),
       ),
-    );
-  }
-}
-
-class _RoleSelector extends StatelessWidget {
-  const _RoleSelector({
-    required this.role,
-    required this.enabled,
-    required this.onSelected,
-  });
-
-  final PrimaryRole role;
-  final bool enabled;
-  final ValueChanged<PrimaryRole> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: AppColors.softSurface,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          for (final option in PrimaryRole.values)
-            Expanded(
-              child: InkWell(
-                onTap: enabled
-                    ? AppHaptics.wrap(() => onSelected(option))
-                    : null,
-                borderRadius: BorderRadius.circular(11),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  height: 46,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: role == option ? AppColors.ink : Colors.transparent,
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: Text(
-                    option == PrimaryRole.driver ? 'Driver' : 'Rider',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: role == option ? Colors.white : AppColors.ink,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileSection extends StatelessWidget {
-  const _ProfileSection({required this.title, required this.children});
-
-  final String title;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(title, style: Theme.of(context).textTheme.labelLarge),
-        const SizedBox(height: 9),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: AppColors.border),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Column(
-            children: [
-              for (var index = 0; index < children.length; index++) ...[
-                children[index],
-                if (index < children.length - 1)
-                  const Divider(height: 1, indent: 58),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ProfileRow extends StatelessWidget {
-  const _ProfileRow({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      onTap: onTap == null ? null : AppHaptics.wrap(onTap),
-      leading: Icon(icon),
-      title: Text(title, style: Theme.of(context).textTheme.labelLarge),
-      subtitle: Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-      trailing: onTap == null
-          ? null
-          : const Icon(Icons.chevron_right_rounded, color: AppColors.mutedInk),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
     );
   }
 }

@@ -28,6 +28,13 @@ void main() {
       );
     });
 
+    test('opens the newly matched ride from a saved-search notification', () {
+      expect(
+        notificationDestination({'route': 'search', 'rideId': 'ride/123'}),
+        '/rides/ride%2F123',
+      );
+    });
+
     test('opens the messages tab without a conversation id', () {
       expect(
         notificationDestination({'route': 'messages'}),

@@ -31,10 +31,15 @@ void main() {
     await tester.enterText(fields.at(1), 'Alijonov');
     await tester.enterText(fields.at(2), 'student@ucsb.edu');
     await tester.enterText(fields.at(3), 'password1');
+    await tester.tap(find.byType(Checkbox).at(0));
+    await tester.tap(find.byType(Checkbox).at(1));
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Continue'));
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pump();
 
     expect(auth.lastSignupEmail, 'student@ucsb.edu');
+    expect(auth.acceptedLegalTerms, isTrue);
+    expect(auth.confirmedAge18, isTrue);
     expect(find.text('Backend validation reached.'), findsOneWidget);
   });
 
@@ -65,6 +70,9 @@ void main() {
       await tester.enterText(fields.at(1), 'Student');
       await tester.enterText(fields.at(2), email);
       await tester.enterText(fields.at(3), 'password1');
+      await tester.tap(find.byType(Checkbox).at(0));
+      await tester.tap(find.byType(Checkbox).at(1));
+      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Continue'));
       await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
       await tester.pumpAndSettle();
 
@@ -173,6 +181,8 @@ class _RecordingAuthRepository implements AuthRepository {
   final AppFailure? resetFailure;
   String? lastSignupEmail;
   String? lastResetEmail;
+  bool acceptedLegalTerms = false;
+  bool confirmedAge18 = false;
 
   @override
   AccountUser? get currentUser => null;
@@ -189,8 +199,12 @@ class _RecordingAuthRepository implements AuthRepository {
     required String lastName,
     required String email,
     required String password,
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
   }) async {
     lastSignupEmail = email;
+    this.acceptedLegalTerms = acceptedLegalTerms;
+    this.confirmedAge18 = confirmedAge18;
     throw const AppFailure('Backend validation reached.');
   }
 
@@ -222,7 +236,10 @@ class _RecordingAuthRepository implements AuthRepository {
   }) => throw UnimplementedError();
 
   @override
-  Future<AccountUser> signInWithGoogle() => throw UnimplementedError();
+  Future<AccountUser> signInWithGoogle({
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
+  }) => throw UnimplementedError();
 
   @override
   Future<void> verifyEmailCode(String code) => throw UnimplementedError();

@@ -2,10 +2,103 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   decodeGooglePolyline,
+  distanceMilesBetween,
+  gasStationMatchesRoute,
+  gasStationRouteMaximumMiles,
+  pointMatchesRouteAndSearchArea,
   pointInPolygon,
   proximityToRoute,
   routePointAllowed,
+  routeSearchMatch,
+  searchRadiusMilesForPlace,
 } from "./ride_routing.js";
+
+test("city searches use a wider discovery corridor than exact stops", () => {
+  assert.equal(searchRadiusMilesForPlace(["street_address"]), 1);
+  assert.equal(searchRadiusMilesForPlace(["locality", "political"]), 12);
+  assert.equal(searchRadiusMilesForPlace(["administrative_area_level_2"]), 22);
+});
+
+test("a same-direction ride through San Jose matches the city corridor", () => {
+  const northboundRoute = [
+    {latitude: 34.42, longitude: -119.70},
+    {latitude: 36.60, longitude: -121.60},
+    {latitude: 37.37, longitude: -121.95},
+    {latitude: 37.77, longitude: -122.42},
+  ];
+  const sanJoseCenter = {latitude: 37.3382, longitude: -121.8863};
+  const sanFrancisco = {latitude: 37.77, longitude: -122.42};
+
+  assert.equal(routeSearchMatch({
+    route: northboundRoute,
+    pickup: sanJoseCenter,
+    dropoff: sanFrancisco,
+    pickupRadiusMiles: 1,
+    dropoffRadiusMiles: 1,
+    boundaryExceptions: [],
+  }), false);
+  assert.equal(routeSearchMatch({
+    route: northboundRoute,
+    pickup: sanJoseCenter,
+    dropoff: sanFrancisco,
+    pickupRadiusMiles: searchRadiusMilesForPlace(["locality"]),
+    dropoffRadiusMiles: searchRadiusMilesForPlace(["locality"]),
+    boundaryExceptions: [],
+  }), true);
+  assert.equal(routeSearchMatch({
+    route: northboundRoute,
+    pickup: sanFrancisco,
+    dropoff: sanJoseCenter,
+    pickupRadiusMiles: 12,
+    dropoffRadiusMiles: 12,
+    boundaryExceptions: [],
+  }), false);
+});
+
+test("search-scoped gas stations must be near both the route and searched city", () => {
+  const route = [
+    {latitude: 37.40, longitude: -122.20},
+    {latitude: 37.80, longitude: -122.50},
+  ];
+  const sanMateo = {latitude: 37.5630, longitude: -122.3255};
+  const nearSanMateoRoute = {latitude: 37.57, longitude: -122.32};
+  const farAlongSameRoute = {latitude: 37.78, longitude: -122.485};
+  const offRoute = {latitude: 37.70, longitude: -121.90};
+
+  assert.equal(pointMatchesRouteAndSearchArea({
+    point: nearSanMateoRoute,
+    route,
+    searchAnchors: [sanMateo],
+  }), true);
+  assert.equal(pointMatchesRouteAndSearchArea({
+    point: farAlongSameRoute,
+    route,
+    searchAnchors: [sanMateo],
+    maximumSearchDistanceMiles: 5,
+  }), false);
+  assert.equal(pointMatchesRouteAndSearchArea({
+    point: offRoute,
+    route,
+    searchAnchors: [sanMateo],
+  }), false);
+  assert.ok(distanceMilesBetween(sanMateo, nearSanMateoRoute) < 1);
+});
+
+test("gas station pins stay inside the half-mile route boundary", () => {
+  const route = [
+    {latitude: 37.30, longitude: -121.90},
+    {latitude: 37.50, longitude: -121.90},
+  ];
+  const comfortablyInside = {latitude: 37.40, longitude: -121.892};
+  const justOutsideHalfMile = {latitude: 37.40, longitude: -121.8905};
+
+  assert.equal(gasStationRouteMaximumMiles, 0.5);
+  assert.ok(proximityToRoute(comfortablyInside, route).distanceMiles < 0.5);
+  assert.equal(gasStationMatchesRoute(comfortablyInside, route), true);
+  assert.ok(proximityToRoute(justOutsideHalfMile, route).distanceMiles < 1);
+  assert.ok(proximityToRoute(justOutsideHalfMile, route).distanceMiles > 0.5);
+  assert.equal(gasStationMatchesRoute(justOutsideHalfMile, route), false);
+});
 
 test("decodes the standard Google encoded polyline", () => {
   assert.deepEqual(decodeGooglePolyline("_p~iF~ps|U_ulLnnqC_mqNvxq`@"), [

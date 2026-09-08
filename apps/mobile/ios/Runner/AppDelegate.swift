@@ -1,4 +1,6 @@
 import Flutter
+import GoogleMaps
+import StoreKit
 import UIKit
 
 @main
@@ -7,6 +9,14 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    if
+      let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+      let configuration = NSDictionary(contentsOfFile: path),
+      let mapsAPIKey = configuration["API_KEY"] as? String,
+      !mapsAPIKey.isEmpty
+    {
+      GMSServices.provideAPIKey(mapsAPIKey)
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -29,6 +39,24 @@ import UIKit
           defaults.set(true, forKey: key)
         }
         result(isFreshInstall)
+        return
+      }
+
+      if call.method == "requestAppReview" {
+        DispatchQueue.main.async {
+          if
+            #available(iOS 14.0, *),
+            let scene = UIApplication.shared.connectedScenes
+              .compactMap({ $0 as? UIWindowScene })
+              .first(where: { $0.activationState == .foregroundActive })
+          {
+            SKStoreReviewController.requestReview(in: scene)
+            result(true)
+          } else {
+            SKStoreReviewController.requestReview()
+            result(true)
+          }
+        }
         return
       }
 

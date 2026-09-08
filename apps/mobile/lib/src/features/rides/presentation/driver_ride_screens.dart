@@ -16,6 +16,9 @@ import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/place_picker_sheet.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_widgets.dart';
 import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
+import 'package:sidecar/src/features/profile/domain/public_profile.dart';
+import 'package:sidecar/src/features/profile/domain/public_profile_repository.dart';
+import 'package:sidecar/src/features/profile/presentation/account_support_screens.dart';
 import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
@@ -30,7 +33,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
   final _price = TextEditingController();
   RidePlacePrediction? _origin;
   RidePlacePrediction? _destination;
-  DateTime _date = DateUtils.dateOnly(DateTime.now());
+  DateTime? _date;
   TimeOfDay? _time;
   int? _seats;
   LuggageAllowance? _luggage;
@@ -65,7 +68,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
   Future<void> _pickDate() async {
     final result = await showDatePicker(
       context: context,
-      initialDate: _date,
+      initialDate: _date ?? DateUtils.dateOnly(DateTime.now()),
       firstDate: DateUtils.dateOnly(DateTime.now()),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
@@ -109,7 +112,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
     _price.clear();
     _origin = null;
     _destination = null;
-    _date = DateUtils.dateOnly(DateTime.now());
+    _date = null;
     _time = null;
     _seats = null;
     _luggage = null;
@@ -131,6 +134,10 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
       setState(() => _error = 'Select a departure time.');
       return;
     }
+    if (_date == null) {
+      setState(() => _error = 'Select a departure date.');
+      return;
+    }
     if (_seats == null) {
       setState(() => _error = 'Select the number of available seats.');
       return;
@@ -140,9 +147,9 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
       return;
     }
     final departure = DateTime(
-      _date.year,
-      _date.month,
-      _date.day,
+      _date!.year,
+      _date!.month,
+      _date!.day,
       _time!.hour,
       _time!.minute,
     );
@@ -197,14 +204,19 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                   title: 'Post a ride',
                   onBack: () => context.go(AppRoutes.home),
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 12),
                 SizedBox(
-                  height: 122,
+                  height: 109,
                   child: RideRouteCard(
                     origin: _origin?.displayName ?? '',
                     destination: _destination?.displayName ?? '',
-                    originPlaceholder: 'Departure Address',
-                    destinationPlaceholder: 'Destination Address',
+                    originPlaceholder: 'Departure City',
+                    destinationPlaceholder: 'Destination City',
+                    routeMarkerColor: AppColors.ink,
+                    locationTextStyle: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w400,
+                    ),
                     onOriginTap: () => _pickPlace(true),
                     onDestinationTap: () => _pickPlace(false),
                   ),
@@ -215,7 +227,10 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                     Expanded(
                       child: _TapField(
                         label: 'Date',
-                        value: formatShortDate(_date),
+                        value: _date == null
+                            ? 'Select date'
+                            : formatShortDate(_date!),
+                        placeholder: _date == null,
                         onTap: _pickDate,
                       ),
                     ),
@@ -224,14 +239,15 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                       child: _TapField(
                         label: 'Time',
                         value: _time?.format(context) ?? 'Select time',
+                        placeholder: _time == null,
                         onTap: _pickTime,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 17),
+                const SizedBox(height: 16),
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: Column(
@@ -259,9 +275,9 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     SizedBox(
-                      width: 130,
+                      width: 115,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -295,7 +311,7 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 17),
                 const _Label('Luggage per rider'),
                 const SizedBox(height: 9),
                 SingleChildScrollView(
@@ -303,28 +319,90 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
                   child: Row(
                     children: [
                       for (final entry in const [
-                        (LuggageAllowance.backpack, 'Backpack only'),
-                        (LuggageAllowance.oneSuitcase, '1 suitcase'),
-                        (LuggageAllowance.twoPlusBags, '2+ bags'),
+                        (LuggageAllowance.backpack, 'Backpack', 89.0),
+                        (LuggageAllowance.oneSuitcase, '1 suitcase', 105.0),
+                        (LuggageAllowance.twoPlusBags, '2+ bags', 82.0),
                       ]) ...[
-                        RideChoiceChip(
-                          label: entry.$2,
-                          selected: _luggage == entry.$1,
-                          compact: true,
-                          onTap: () => setState(() => _luggage = entry.$1),
+                        SizedBox(
+                          width: entry.$3,
+                          child: RideChoiceChip(
+                            label: entry.$2,
+                            selected: _luggage == entry.$1,
+                            compact: true,
+                            onTap: () => setState(() => _luggage = entry.$1),
+                          ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 9),
                       ],
                     ],
                   ),
                 ),
-                const SizedBox(height: 18),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Women only'),
-                  subtitle: const Text('Only women can request a seat'),
-                  value: _womenOnly,
-                  onChanged: (value) => setState(() => _womenOnly = value),
+                const SizedBox(height: 17),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(color: AppColors.border),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const _Label('Women only'),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Only women can request a seat',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: _womenOnly,
+                        activeTrackColor: AppColors.primary,
+                        onChanged: (value) =>
+                            setState(() => _womenOnly = value),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppColors.information,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Drivers must:',
+                        style: TextStyle(
+                          fontFamily: 'Arial',
+                          color: AppColors.ink,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Carry active auto insurance during the trip\n'
+                        'Wait 10 minutes past pickup time before marking a no-show\n'
+                        'A 5% platform fee is deducted from your total reimbursement.',
+                        style: TextStyle(
+                          fontFamily: 'Arial',
+                          color: AppColors.secondaryInk,
+                          fontSize: 13,
+                          height: 1.3,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 14),
@@ -339,8 +417,11 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 12, 24, 18),
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 34),
             child: FilledButton(
+              style: AppButtonStyles.primaryFilled.copyWith(
+                minimumSize: const WidgetStatePropertyAll(Size.fromHeight(50)),
+              ),
               onPressed: _saving ? null : _submit,
               child: Text(_saving ? 'Posting…' : 'Post ride'),
             ),
@@ -575,23 +656,9 @@ class _MyRidesScreenState extends ConsumerState<MyRidesScreen> {
   }
 
   Future<void> _cancelRide(Ride ride) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancel this ride?'),
-        content: const Text(
-          'It will be removed from search and can no longer accept riders.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep ride'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancel ride'),
-          ),
-        ],
+    final confirmed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CancelRideConfirmationScreen(ride: ride),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -625,7 +692,7 @@ class _MyRidesScreenState extends ConsumerState<MyRidesScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 21, 18, 0),
+            padding: const EdgeInsets.fromLTRB(24, 21, 24, 0),
             child: Row(
               children: [
                 Expanded(
@@ -638,17 +705,22 @@ class _MyRidesScreenState extends ConsumerState<MyRidesScreen> {
                   button: true,
                   label: 'Post a ride',
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(11),
+                    borderRadius: BorderRadius.circular(10),
                     onTap: () => context.go(AppRoutes.postRide),
                     child: Container(
-                      width: 38,
-                      height: 38,
+                      width: 40,
+                      height: 40,
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: AppColors.softSurface,
-                        borderRadius: BorderRadius.circular(11),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.add, size: 26, weight: 1),
+                      child: const Icon(
+                        Icons.add,
+                        size: 26,
+                        color: AppColors.ink,
+                        weight: 1,
+                      ),
                     ),
                   ),
                 ),
@@ -859,95 +931,109 @@ class _DriverRequestsListState extends ConsumerState<_DriverRequestsList> {
             itemBuilder: (context, index) {
               final booking = requests[index];
               final busy = _busyId == booking.id;
-              return Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.border),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  children: [
-                    InkWell(
-                      onTap: () => context.push('/profiles/${booking.riderId}'),
-                      borderRadius: BorderRadius.circular(10),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            RideAvatar(
-                              initials: booking.riderInitials,
-                              photoUrl: booking.riderPhotoUrl,
-                              radius: 22,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    booking.riderName,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
-                                  ),
-                                  Text(
-                                    '${booking.originName} → ${booking.destinationName}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const RideBadge(label: 'Pending'),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (booking.pickupLocation != null ||
-                        booking.dropoffLocation != null) ...[
-                      const SizedBox(height: 10),
-                      _BookingStops(booking: booking),
-                    ],
-                    const SizedBox(height: 13),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.danger,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: busy
-                                ? null
-                                : () => _respond(booking, false),
-                            child: const Text('Decline'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF167A52),
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: busy
-                                ? null
-                                : () => _respond(booking, true),
-                            child: Text(busy ? 'Please wait…' : 'Accept'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              return _DriverRequestCard(
+                booking: booking,
+                busy: busy,
+                onDecline: () => _respond(booking, false),
+                onAccept: () => _respond(booking, true),
               );
             },
           );
         },
       ),
+    );
+  }
+}
+
+class _DriverRequestCard extends ConsumerStatefulWidget {
+  const _DriverRequestCard({
+    required this.booking,
+    required this.busy,
+    required this.onDecline,
+    required this.onAccept,
+  });
+
+  final SeatBooking booking;
+  final bool busy;
+  final VoidCallback onDecline;
+  final VoidCallback onAccept;
+
+  @override
+  ConsumerState<_DriverRequestCard> createState() => _DriverRequestCardState();
+}
+
+class _DriverRequestCardState extends ConsumerState<_DriverRequestCard> {
+  late Future<PublicProfile> _profile;
+
+  @override
+  void initState() {
+    super.initState();
+    _profile = ref
+        .read(publicProfileRepositoryProvider)
+        .getProfile(widget.booking.riderId);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DriverRequestCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.booking.riderId != widget.booking.riderId) {
+      _profile = ref
+          .read(publicProfileRepositoryProvider)
+          .getProfile(widget.booking.riderId);
+    }
+  }
+
+  String _priceLabel(int cents) => '\$${(cents / 100).round()}';
+
+  @override
+  Widget build(BuildContext context) {
+    final booking = widget.booking;
+    return FutureBuilder<PublicProfile>(
+      future: _profile,
+      builder: (context, snapshot) {
+        final profile = snapshot.data;
+        return RideSummaryCard(
+          origin: booking.originName,
+          destination: booking.destinationName,
+          dateLabel: formatShortDate(booking.departureAt),
+          timeLabel: formatTime(booking.departureAt),
+          priceLabel: _priceLabel(booking.baseFareCents),
+          bookedLabel: 'Seat requested',
+          profileName: booking.riderName,
+          profileInitials: booking.riderInitials,
+          profilePhotoUrl: booking.riderPhotoUrl,
+          profileRating: profile?.rating,
+          keyPrefix: 'driver-request-${booking.id}',
+          onTap: () => context.push('/profiles/${booking.riderId}'),
+          footer: Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.dangerSurface,
+                    foregroundColor: AppColors.danger,
+                    minimumSize: const Size(0, 40),
+                  ),
+                  onPressed: widget.busy ? null : widget.onDecline,
+                  child: const Text('Decline'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE5F3EA),
+                    foregroundColor: const Color(0xFF167A52),
+                    minimumSize: const Size(0, 40),
+                  ),
+                  onPressed: widget.busy ? null : widget.onAccept,
+                  child: Text(widget.busy ? 'Please wait…' : 'Accept'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -964,6 +1050,27 @@ class _RiderBookingCard extends ConsumerStatefulWidget {
 
 class _RiderBookingCardState extends ConsumerState<_RiderBookingCard> {
   bool _busy = false;
+  late Future<PublicProfile> _driverProfile;
+
+  @override
+  void initState() {
+    super.initState();
+    _driverProfile = ref
+        .read(publicProfileRepositoryProvider)
+        .getProfile(widget.booking.driverId);
+  }
+
+  @override
+  void didUpdateWidget(covariant _RiderBookingCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.booking.driverId != widget.booking.driverId) {
+      _driverProfile = ref
+          .read(publicProfileRepositoryProvider)
+          .getProfile(widget.booking.driverId);
+    }
+  }
+
+  String _priceLabel(int cents) => '\$${(cents / 100).round()}';
 
   Future<void> _run(
     Future<void> Function() action, {
@@ -1027,134 +1134,72 @@ class _RiderBookingCardState extends ConsumerState<_RiderBookingCard> {
       ),
       _ => (_bookingStatusLabel(booking.status), '', () async {}),
     };
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            onTap: () => context.push('/rides/${booking.rideId}'),
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: [
-                  RideAvatar(
-                    initials: booking.driverName
-                        .split(' ')
-                        .take(2)
-                        .map((part) => part.isEmpty ? '' : part[0])
-                        .join(),
-                    photoUrl: booking.driverPhotoUrl,
-                    radius: 21,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          booking.driverName,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        Text(
-                          '${booking.originName} → ${booking.destinationName} · ${formatShortDate(booking.departureAt)}, ${formatTime(booking.departureAt)}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                  RideBadge(label: _bookingStatusLabel(booking.status)),
-                ],
+    return FutureBuilder<PublicProfile>(
+      future: _driverProfile,
+      builder: (context, snapshot) {
+        final profile = snapshot.data;
+        final actionBackground = switch (booking.status) {
+          BookingStatus.pendingDriver => AppColors.dangerSurface,
+          BookingStatus.acceptedPaymentPending ||
+          BookingStatus.paymentProcessing => AppColors.primary,
+          _ => AppColors.softSurface,
+        };
+        final actionForeground = switch (booking.status) {
+          BookingStatus.pendingDriver => AppColors.danger,
+          BookingStatus.acceptedPaymentPending ||
+          BookingStatus.paymentProcessing => Colors.white,
+          _ => AppColors.primary,
+        };
+        return RideSummaryCard(
+          origin: booking.originName,
+          destination: booking.destinationName,
+          dateLabel: formatShortDate(booking.departureAt),
+          timeLabel: formatTime(booking.departureAt),
+          priceLabel: _priceLabel(booking.baseFareCents),
+          bookedLabel: _bookingStatusLabel(booking.status),
+          profileName: booking.driverName,
+          profileInitials: booking.driverName
+              .split(' ')
+              .take(2)
+              .map((part) => part.isEmpty ? '' : part[0])
+              .join(),
+          profilePhotoUrl: booking.driverPhotoUrl,
+          profileRating: profile?.rating,
+          keyPrefix: 'rider-booking-${booking.id}',
+          onTap: () => context.push('/rides/${booking.rideId}'),
+          footer: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                action.$1,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.mutedInk,
+                  fontSize: 11,
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '${booking.seat.label} seat',
-            style: Theme.of(context).textTheme.labelMedium,
-          ),
-          if (booking.pickupLocation != null ||
-              booking.dropoffLocation != null) ...[
-            const SizedBox(height: 8),
-            _BookingStops(booking: booking),
-          ],
-          const SizedBox(height: 13),
-          const Divider(height: 1),
-          const SizedBox(height: 12),
-          Text(action.$1, style: Theme.of(context).textTheme.bodySmall),
-          if (action.$2.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            FilledButton(
-              style:
-                  FilledButton.styleFrom(
-                    backgroundColor:
-                        booking.status == BookingStatus.pendingDriver
-                        ? Colors.white
-                        : AppColors.ink,
-                    foregroundColor: AppColors.ink,
-                    side: booking.status == BookingStatus.pendingDriver
-                        ? const BorderSide(color: AppColors.border)
-                        : BorderSide.none,
-                  ).copyWith(
-                    foregroundColor: WidgetStatePropertyAll(
-                      booking.status == BookingStatus.pendingDriver
-                          ? AppColors.ink
-                          : Colors.white,
+              if (action.$2.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: actionBackground,
+                    foregroundColor: actionForeground,
+                    minimumSize: const Size(0, 40),
+                    padding: EdgeInsets.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    textStyle: const TextStyle(
+                      fontFamily: 'Arial',
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-              onPressed: _busy ? null : action.$3,
-              child: Text(_busy ? 'Please wait…' : action.$2),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _BookingStops extends StatelessWidget {
-  const _BookingStops({required this.booking});
-
-  final SeatBooking booking;
-
-  @override
-  Widget build(BuildContext context) {
-    final pickup = booking.pickupLocation;
-    final dropoff = booking.dropoffLocation;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: AppColors.softSurface,
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (pickup != null)
-            Text(
-              'Pickup · ${pickup.formattedAddress}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          if (pickup != null && dropoff != null) const SizedBox(height: 4),
-          if (dropoff != null)
-            Text(
-              'Drop-off · ${dropoff.formattedAddress}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-        ],
-      ),
+                  onPressed: _busy ? null : action.$3,
+                  child: Text(_busy ? 'Please wait…' : action.$2),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -1190,7 +1235,7 @@ class _RideTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 43,
+      height: 40,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: AppColors.softSurface,
@@ -1267,10 +1312,10 @@ class _RideListTab extends StatelessWidget {
       borderRadius: BorderRadius.circular(99),
       onTap: onTap,
       child: Container(
-        height: 35,
+        height: 34,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? AppColors.ink : Colors.transparent,
+          color: selected ? AppColors.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(99),
         ),
         child: FittedBox(
@@ -1318,41 +1363,32 @@ class _ManagedRideCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${formatShortDate(ride.departureAt)} · ${formatTime(ride.departureAt)}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              RideBadge(label: '${ride.bookedSeats}/${ride.seatsTotal} booked'),
-            ],
-          ),
-          const SizedBox(height: 12),
-          InkWell(
-            onTap: onView,
-            child: _CompactManagedRoute(ride: ride),
-          ),
-          if (showActions) ...[
-            const SizedBox(height: 10),
-            Row(
+    return RideSummaryCard(
+      origin: ride.origin.displayName,
+      destination: ride.destination.displayName,
+      dateLabel: formatShortDate(ride.departureAt),
+      timeLabel: formatTime(ride.departureAt),
+      priceLabel: ride.priceLabel,
+      bookedLabel: '${ride.bookedSeats}/${ride.seatsTotal} booked',
+      onTap: onView,
+      keyPrefix: 'managed-ride-${ride.id}',
+      footer: showActions
+          ? Row(
               children: [
                 Expanded(
                   child: FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFFFE2DE),
                       foregroundColor: AppColors.danger,
-                      minimumSize: const Size.fromHeight(38),
+                      minimumSize: const Size(0, 34),
+                      maximumSize: const Size(double.infinity, 34),
+                      padding: EdgeInsets.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(
+                        fontFamily: 'Arial',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     onPressed: onCancel,
                     child: const Text('Cancel ride'),
@@ -1364,7 +1400,15 @@ class _ManagedRideCard extends StatelessWidget {
                     style: FilledButton.styleFrom(
                       backgroundColor: AppColors.softSurface,
                       foregroundColor: AppColors.ink,
-                      minimumSize: const Size.fromHeight(38),
+                      minimumSize: const Size(0, 34),
+                      maximumSize: const Size(double.infinity, 34),
+                      padding: EdgeInsets.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(
+                        fontFamily: 'Arial',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     onPressed: ride.shareUrl.isEmpty
                         ? null
@@ -1378,83 +1422,31 @@ class _ManagedRideCard extends StatelessWidget {
                   ),
                 ),
               ],
+            )
+          : Text(
+              _managedRideStatusLabel(ride.status),
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.primary,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ],
-        ],
-      ),
     );
   }
 }
 
-class _CompactManagedRoute extends StatelessWidget {
-  const _CompactManagedRoute({required this.ride});
-
-  final Ride ride;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 55,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 16,
-            height: 55,
-            child: Column(
-              children: [
-                Container(
-                  width: 11,
-                  height: 11,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.ink, width: 1.5),
-                  ),
-                ),
-                Expanded(child: CustomPaint(painter: _ManagedDottedPainter())),
-                const CircleAvatar(radius: 5, backgroundColor: AppColors.ink),
-              ],
-            ),
-          ),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  ride.origin.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text(
-                  ride.destination.displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ManagedDottedPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = const Color(0xFFBDBDC2);
-    for (var y = 2.0; y < size.height - 2; y += 5) {
-      canvas.drawCircle(Offset(size.width / 2, y), .65, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
+String _managedRideStatusLabel(String status) => switch (status) {
+  'completed' => 'Completed',
+  'cancelled' => 'Cancelled',
+  'in_progress' => 'In progress',
+  _ =>
+    status
+        .split('_')
+        .where((part) => part.isNotEmpty)
+        .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' '),
+};
 
 class _PageHeader extends StatelessWidget {
   const _PageHeader({required this.title, required this.onBack});
@@ -1475,11 +1467,20 @@ class _PageHeader extends StatelessWidget {
               child: IconButton(
                 tooltip: 'Back',
                 padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 24,
+                  height: 38,
+                ),
                 onPressed: onBack,
-                icon: const FinalDraftBackIcon(size: 24),
+                icon: const FinalDraftBackIcon(size: 30),
               ),
             ),
-          Text(title, style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontSize: 18),
+          ),
         ],
       ),
     );
@@ -1491,11 +1492,13 @@ class _TapField extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onTap,
+    this.placeholder = false,
   });
 
   final String label;
   final String value;
   final VoidCallback onTap;
+  final bool placeholder;
 
   @override
   Widget build(BuildContext context) {
@@ -1508,14 +1511,22 @@ class _TapField extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(9),
           child: Container(
-            height: 52,
+            height: 48,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             alignment: Alignment.centerLeft,
             decoration: BoxDecoration(
+              color: Colors.white,
               border: Border.all(color: AppColors.border),
               borderRadius: BorderRadius.circular(9),
             ),
-            child: Text(value),
+            child: Text(
+              value,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: placeholder ? AppColors.mutedInk : AppColors.ink,
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
           ),
         ),
       ],
@@ -1550,13 +1561,13 @@ class _SeatOption extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(99),
       child: Container(
-        height: 35,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        width: 36,
+        height: 36,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected ? AppColors.ink : Colors.white,
+          color: selected ? AppColors.primary : Colors.white,
           border: Border.all(
-            color: selected ? AppColors.ink : AppColors.border,
+            color: selected ? AppColors.primary : AppColors.border,
           ),
           borderRadius: BorderRadius.circular(99),
         ),

@@ -33,7 +33,7 @@ void showAppNotice(
                 message,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontFamily: 'SideCar Sans',
+                  fontFamily: 'Arial',
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                 ),
@@ -41,7 +41,7 @@ void showAppNotice(
             ),
           ],
         ),
-        backgroundColor: isError ? AppColors.danger : AppColors.ink,
+        backgroundColor: isError ? AppColors.danger : AppColors.primary,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(milliseconds: 2400),
         dismissDirection: DismissDirection.down,

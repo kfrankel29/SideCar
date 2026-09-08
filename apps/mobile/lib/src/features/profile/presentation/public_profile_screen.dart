@@ -146,6 +146,7 @@ class _ProfileBody extends StatelessWidget {
       if (profile.gender.isNotEmpty) profile.gender,
       if (profile.language.isNotEmpty) profile.language,
     ].join(' · ');
+    final recentReviews = profile.reviews.take(3).toList(growable: false);
     return SafeArea(
       top: false,
       child: ListView(
@@ -194,6 +195,24 @@ class _ProfileBody extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 28),
+          Text('Reviews', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 10),
+          if (profile.reviews.isEmpty)
+            Text(
+              'No reviews yet.',
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          else
+            for (final review in recentReviews) ...[
+              _PublicReviewCard(review: review),
+              const SizedBox(height: 10),
+            ],
+          if (profile.reviews.length > recentReviews.length)
+            TextButton(
+              onPressed: () => _showAllReviews(context, profile),
+              child: Text('View all ${profile.reviews.length} reviews'),
+            ),
           const SizedBox(height: 34),
           FilledButton(
             onPressed: blocked ? null : onMessage,
@@ -219,6 +238,77 @@ class _ProfileBody extends StatelessWidget {
       ),
     );
   }
+
+  void _showAllReviews(BuildContext context, PublicProfile profile) {
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => FractionallySizedBox(
+        heightFactor: 0.88,
+        child: Scaffold(
+          appBar: AppBar(title: Text('${profile.displayName} reviews')),
+          body: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 28),
+            itemCount: profile.reviews.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, index) =>
+                _PublicReviewCard(review: profile.reviews[index]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PublicReviewCard extends StatelessWidget {
+  const _PublicReviewCard({required this.review});
+
+  final PublicReview review;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      border: Border.all(color: AppColors.border),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RideAvatar(
+          initials: review.reviewerInitials,
+          photoUrl: review.reviewerPhotoUrl,
+          radius: 20,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      review.reviewerName,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  const Icon(Icons.star_rounded, size: 17),
+                  const SizedBox(width: 3),
+                  Text(review.rating.toStringAsFixed(1)),
+                ],
+              ),
+              if (review.comment.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(review.comment),
+              ],
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _ProfileMetric extends StatelessWidget {

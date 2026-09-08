@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
+import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/rides/data/firebase_ride_repository.dart';
@@ -26,7 +27,7 @@ void main() {
     );
     expect(
       tester.getTopLeft(find.text('Live Ride')).dy,
-      lessThan(tester.getTopLeft(find.text('Your upcoming rides')).dy),
+      lessThan(tester.getTopLeft(find.text('Your upcoming ride')).dy),
     );
   });
 
@@ -45,9 +46,46 @@ void main() {
       lessThan(tester.getTopLeft(find.text('Leaving soon')).dy),
     );
   });
+
+  testWidgets('rider upcoming trip only shows a paid confirmed seat', (
+    tester,
+  ) async {
+    final departure = DateTime.now().add(const Duration(days: 1));
+    await _pumpHome(
+      tester,
+      role: PrimaryRole.rider,
+      rideRepository: _NoLiveRideRepository(),
+      bookingRepository: _UpcomingBookingRepository([
+        _booking(
+          id: 'unpaid',
+          rideId: 'unpaid-ride',
+          origin: 'Unpaid pickup',
+          departure: departure,
+          status: 'accepted_payment_pending',
+        ),
+        _booking(
+          id: 'paid',
+          rideId: 'paid-ride',
+          origin: 'Paid pickup',
+          departure: departure,
+          status: 'confirmed',
+          paymentStatus: 'paid',
+        ),
+      ]),
+    );
+
+    expect(find.text('Upcoming trip'), findsOneWidget);
+    expect(find.textContaining('Paid pickup'), findsOneWidget);
+    expect(find.textContaining('Unpaid pickup'), findsNothing);
+  });
 }
 
-Future<void> _pumpHome(WidgetTester tester, {required PrimaryRole role}) async {
+Future<void> _pumpHome(
+  WidgetTester tester, {
+  required PrimaryRole role,
+  RideRepository? rideRepository,
+  BookingRepository? bookingRepository,
+}) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -56,8 +94,12 @@ Future<void> _pumpHome(WidgetTester tester, {required PrimaryRole role}) async {
     ProviderScope(
       overrides: [
         profileRepositoryProvider.overrideWithValue(_ProfileRepository(role)),
-        rideRepositoryProvider.overrideWithValue(_RideRepository()),
-        bookingRepositoryProvider.overrideWithValue(_BookingRepository()),
+        rideRepositoryProvider.overrideWithValue(
+          rideRepository ?? _RideRepository(),
+        ),
+        bookingRepositoryProvider.overrideWithValue(
+          bookingRepository ?? _BookingRepository(),
+        ),
       ],
       child: MaterialApp(theme: AppTheme.light, home: const RideHomeScreen()),
     ),
@@ -94,6 +136,32 @@ class _BookingRepository extends UnavailableBookingRepository {
   @override
   Future<List<SeatBooking>> listMyBookings({bool forceRefresh = false}) async =>
       [_activeBooking];
+}
+
+class _UpcomingBookingRepository extends UnavailableBookingRepository {
+  const _UpcomingBookingRepository(this.bookings);
+
+  final List<SeatBooking> bookings;
+
+  @override
+  Future<List<SeatBooking>> listMyBookings({bool forceRefresh = false}) async =>
+      bookings;
+}
+
+class _NoLiveRideRepository extends UnavailableRideRepository {
+  @override
+  Future<List<Ride>> listLeavingSoon({bool forceRefresh = false}) async => [];
+
+  @override
+  Future<LiveTripPlan> getLiveTrip(String rideId) async =>
+      throw const AppFailure(
+        'Trip has not started.',
+        code: 'failed-precondition',
+      );
+
+  @override
+  Future<Ride> getRide(String rideId) async =>
+      _activeRide.copyWith(status: 'published');
 }
 
 class _ProfileRepository implements ProfileRepository {
@@ -186,6 +254,32 @@ final _activeBooking = SeatBooking.fromJson({
   'originName': 'Isla Vista',
   'destinationName': 'Palo Alto',
   'departureAt': DateTime.now().toIso8601String(),
+  'baseFareCents': 5000,
+  'serviceFeeCents': 400,
+  'processingFeeCents': 190,
+  'totalCents': 5590,
+});
+
+SeatBooking _booking({
+  required String id,
+  required String rideId,
+  required String origin,
+  required DateTime departure,
+  required String status,
+  String paymentStatus = '',
+}) => SeatBooking.fromJson({
+  'id': id,
+  'rideId': rideId,
+  'riderId': 'rider',
+  'riderName': 'Riley Tester',
+  'riderInitials': 'RT',
+  'driverId': 'driver',
+  'driverName': 'Dana Tester',
+  'status': status,
+  'paymentStatus': paymentStatus,
+  'originName': origin,
+  'destinationName': 'Palo Alto',
+  'departureAt': departure.toIso8601String(),
   'baseFareCents': 5000,
   'serviceFeeCents': 400,
   'processingFeeCents': 190,

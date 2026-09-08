@@ -62,12 +62,24 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
   void _openNotification(NotificationAction action) {
     if (!mounted) return;
     final router = ref.read(appRouterProvider);
-    router.go(notificationDestination(action.data));
+    final destination = notificationDestination(action.data);
+    if (!destination.startsWith('/messages')) {
+      unawaited(
+        ref
+            .read(notificationServiceProvider)
+            .markRideUpdatesRead()
+            .whenComplete(
+              () => ref.invalidate(rideNotificationAttentionProvider),
+            ),
+      );
+    }
+    router.go(destination);
   }
 
   void _refreshNotificationState() {
     if (!mounted) return;
     ref.invalidate(driverPendingRequestCountProvider);
+    ref.invalidate(rideNotificationAttentionProvider);
     ref.read(mainTabActivationProvider.notifier).activate(0);
   }
 
@@ -83,6 +95,9 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
         if (_wasBackgrounded) {
           _wasBackgrounded = false;
           _refreshNotificationState();
+          unawaited(
+            ref.read(notificationServiceProvider).refreshRegistration(),
+          );
           unawaited(_validateRestoredSession());
         }
     }
@@ -152,7 +167,7 @@ String notificationDestination(Map<String, String> data) {
 
   final route = data['route']?.trim();
   final rideId = data['rideId']?.trim();
-  if ((route == 'live_trip' || route == 'rating') &&
+  if ((route == 'live_trip' || route == 'rating' || route == 'search') &&
       rideId != null &&
       rideId.isNotEmpty) {
     return '/rides/${Uri.encodeComponent(rideId)}';

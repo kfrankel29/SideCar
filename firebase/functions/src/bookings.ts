@@ -10,6 +10,8 @@ import {onSchedule} from "firebase-functions/v2/scheduler";
 import Stripe from "stripe";
 import {
   CheckoutPolicy,
+  canMarkRiderNoShow,
+  countsTowardCompletedRideReimbursement,
   RefundTier,
   canRequestGenderRestrictedRide,
   calculateCheckoutAmounts,
@@ -25,7 +27,6 @@ import {
 import {
   finishLiveTrip,
   liveTripMapsSecret,
-  refreshLiveTripAfterPickup,
 } from "./live_trips.js";
 import {isCaliforniaAddress} from "./service_area.js";
 
@@ -160,9 +161,10 @@ async function remoteNumber(key: string): Promise<number> {
 }
 
 async function checkoutPolicy(): Promise<CheckoutPolicy> {
-  const [type, value, cardRate, cardFixed, bankRate] = await Promise.all([
+  const [type, value, driverFee, cardRate, cardFixed, bankRate] = await Promise.all([
     remoteValue("service_fee_type"),
     remoteNumber("service_fee_value"),
+    remoteNumber("driver_fee_percentage"),
     remoteNumber("stripe_card_percentage"),
     remoteNumber("stripe_card_fixed_cents"),
     remoteNumber("stripe_bank_percentage"),
@@ -173,10 +175,33 @@ async function checkoutPolicy(): Promise<CheckoutPolicy> {
   return {
     serviceFeeType: type,
     serviceFeeValue: value,
+    driverFeePercentage: driverFee,
     cardRate: cardRate / 100,
     cardFixedCents: Math.round(cardFixed),
     bankRate: bankRate / 100,
   };
+}
+
+async function releaseBookingCredit(
+  reference: FirebaseFirestore.DocumentReference,
+): Promise<void> {
+  await db.runTransaction(async (transaction) => {
+    const bookingSnapshot = await transaction.get(reference);
+    const booking = bookingSnapshot.data();
+    const credit = Number(booking?.creditAppliedCents ?? 0);
+    if (!booking || credit <= 0 || booking.creditReservationStatus !== "reserved") return;
+    const riderId = String(booking.riderId ?? "");
+    if (!riderId) return;
+    transaction.set(db.collection("users").doc(riderId), {
+      creditCents: FieldValue.increment(credit),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    transaction.update(reference, {
+      creditReservationStatus: "released",
+      creditReleasedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
 }
 
 async function refundTiers(): Promise<RefundTier[]> {
@@ -220,12 +245,14 @@ async function requireVerifiedUser(uid: string, driver = false): Promise<Json> {
   const vehicle = snapshots[2]?.data();
   const schoolVerified = record.emailVerified ||
     record.customClaims?.schoolEmailVerified === true;
+  if (profile?.accountStatus === "suspended" || profile?.accountStatus === "banned") {
+    throw new HttpsError("permission-denied", "This account is not active.");
+  }
   if (!schoolVerified || profile?.profileComplete !== true ||
       verification?.identityStatus !== "verified") {
     throw new HttpsError("failed-precondition", "Complete your profile and verification first.");
   }
-  if (driver && (verification?.insuranceStatus !== "verified" ||
-      vehicle?.complete !== true)) {
+  if (driver && vehicle?.complete !== true) {
     throw new HttpsError("failed-precondition", "Complete driver verification first.");
   }
   return profile ?? {};
@@ -286,8 +313,12 @@ function bookingJson(
     ratedAt: timestampIso(data.ratedAt),
     ratingSkippedAt: timestampIso(data.ratingSkippedAt),
     riderRatedAt: timestampIso(data.riderRatedAt),
+    riderRatingSkippedAt: timestampIso(data.riderRatingSkippedAt),
+    riderNoShow: data.riderNoShow === true,
+    riderNoShowAt: timestampIso(data.riderNoShowAt),
     baseFareCents: data.baseFareCents ?? 0,
     serviceFeeCents: data.serviceFeeCents ?? 0,
+    driverPlatformFeeCents: data.driverPlatformFeeCents ?? 0,
     processingFeeCents: data.processingFeeCents ?? 0,
     totalCents: data.totalCents ?? data.baseFareCents ?? 0,
     paymentMethod: data.paymentMethod ?? "card",
@@ -441,7 +472,7 @@ async function validatedBookingStops(params: {
   if (!pickupMatch.allowed || !dropoffMatch.allowed) {
     throw new HttpsError(
       "failed-precondition",
-      "Pickup and drop-off must be within 1 mile of the driver’s route or inside the approved boundary.",
+      "Both addresses must be within 1 mile of the driver’s route or student housing (Isla Vista / UCSB housing).",
     );
   }
   if (pickupMatch.progress > dropoffMatch.progress) {
@@ -634,12 +665,17 @@ export const createBookingPayment = onCall(
     const expiresAt = booking.paymentExpiresAt as Timestamp | undefined;
     if (!expiresAt || expiresAt.toMillis() <= Date.now()) {
       await reference.update({status: "expired", updatedAt: FieldValue.serverTimestamp()});
+      await releaseBookingCredit(reference);
       throw new HttpsError("deadline-exceeded", "The 24-hour payment window has expired.");
     }
-    const amounts = calculateCheckoutAmounts(
+    const policy = await checkoutPolicy();
+    const existingReservedCredit = booking.creditReservationStatus === "reserved" ?
+      Number(booking.creditAppliedCents ?? 0) : 0;
+    let amounts = calculateCheckoutAmounts(
       Number(booking.baseFareCents),
-      await checkoutPolicy(),
+      policy,
       paymentMethod,
+      existingReservedCredit,
     );
     const customer = await customerSession(request.auth.uid);
     let existingIntentId = typeof booking.paymentIntentId === "string" ?
@@ -668,21 +704,63 @@ export const createBookingPayment = onCall(
       }
     }
     if (!existingIntentId || intent?.status === "canceled") {
-      intent = await stripe().paymentIntents.create({
-        amount: amounts.totalCents,
-        currency: "usd",
-        customer: customer.customerId,
-        payment_method_types: [paymentMethod === "bank" ? "us_bank_account" : "card"],
-        setup_future_usage: "off_session",
-        metadata: {
-          bookingId: id,
-          rideId: String(booking.rideId),
-          riderId: request.auth.uid,
-          driverId: String(booking.driverId),
-        },
-        transfer_group: `ride_${String(booking.rideId)}`,
-        description: "SideCar seat booking",
-      }, {idempotencyKey: `booking-payment-${id}-${paymentMethod}`});
+      amounts = await db.runTransaction(async (transaction) => {
+        const [currentBooking, userSnapshot] = await Promise.all([
+          transaction.get(reference),
+          transaction.get(db.collection("users").doc(request.auth!.uid)),
+        ]);
+        const current = currentBooking.data();
+        if (!current || !["accepted_payment_pending", "payment_processing"]
+          .includes(String(current.status))) {
+          throw new HttpsError("aborted", "This request changed. Refresh and try again.");
+        }
+        const alreadyReserved = current.creditReservationStatus === "reserved" ?
+          Number(current.creditAppliedCents ?? 0) : 0;
+        const availableCredit = alreadyReserved > 0 ? alreadyReserved :
+          Math.max(0, Number(userSnapshot.data()?.creditCents ?? 0));
+        const reservedAmounts = calculateCheckoutAmounts(
+          Number(current.baseFareCents),
+          policy,
+          paymentMethod,
+          availableCredit,
+        );
+        if (alreadyReserved === 0 && reservedAmounts.creditAppliedCents > 0) {
+          transaction.update(db.collection("users").doc(request.auth!.uid), {
+            creditCents: FieldValue.increment(-reservedAmounts.creditAppliedCents),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+        transaction.update(reference, {
+          ...reservedAmounts,
+          creditReservationStatus: reservedAmounts.creditAppliedCents > 0 ?
+            "reserved" : "none",
+          creditReservedAt: reservedAmounts.creditAppliedCents > 0 ?
+            FieldValue.serverTimestamp() : null,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        return reservedAmounts;
+      });
+      try {
+        intent = await stripe().paymentIntents.create({
+          amount: amounts.totalCents,
+          currency: "usd",
+          customer: customer.customerId,
+          payment_method_types: [paymentMethod === "bank" ? "us_bank_account" : "card"],
+          setup_future_usage: "off_session",
+          metadata: {
+            bookingId: id,
+            rideId: String(booking.rideId),
+            riderId: request.auth.uid,
+            driverId: String(booking.driverId),
+            creditAppliedCents: String(amounts.creditAppliedCents),
+          },
+          transfer_group: `ride_${String(booking.rideId)}`,
+          description: "SideCar seat booking",
+        }, {idempotencyKey: `booking-payment-${id}-${paymentMethod}`});
+      } catch (error) {
+        await releaseBookingCredit(reference);
+        throw error;
+      }
       await reference.update({
         ...amounts,
         paymentMethod,
@@ -714,7 +792,11 @@ export const quoteBookingPayment = onCall(
     const data = object(request.data);
     const id = stringValue(data.bookingId, "Request", 128);
     const paymentMethod = data.paymentMethod === "bank" ? "bank" : "card";
-    const booking = (await db.collection("bookings").doc(id).get()).data();
+    const [bookingSnapshot, userSnapshot] = await Promise.all([
+      db.collection("bookings").doc(id).get(),
+      db.collection("users").doc(request.auth.uid).get(),
+    ]);
+    const booking = bookingSnapshot.data();
     if (!booking || booking.riderId !== request.auth.uid) {
       throw new HttpsError("permission-denied", "You cannot view this payment.");
     }
@@ -730,6 +812,9 @@ export const quoteBookingPayment = onCall(
         Number(booking.baseFareCents),
         await checkoutPolicy(),
         paymentMethod,
+        booking.creditReservationStatus === "reserved" ?
+          Number(booking.creditAppliedCents ?? 0) :
+          Math.max(0, Number(userSnapshot.data()?.creditCents ?? 0)),
       ),
     };
   },
@@ -865,6 +950,8 @@ async function confirmPaidBooking(intent: Stripe.PaymentIntent): Promise<void> {
     transaction.update(bookingReference, {
       status: "confirmed" satisfies BookingStatus,
       paymentStatus: "paid",
+      creditReservationStatus: Number(booking.creditAppliedCents ?? 0) > 0 ?
+        "consumed" : "none",
       chargeId: typeof intent.latest_charge === "string" ? intent.latest_charge : "",
       confirmedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
@@ -881,6 +968,7 @@ async function confirmPaidBooking(intent: Stripe.PaymentIntent): Promise<void> {
       refundedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
+    await releaseBookingCredit(bookingReference);
     await notify(riderId, "payment_refunded_seat_unavailable", {
       bookingId: document.id,
       rideId,
@@ -1083,6 +1171,34 @@ async function transferDriverShare(params: {
   return transfer.id;
 }
 
+async function finalizeBookingWithDriverEarnings(params: {
+  reference: FirebaseFirestore.DocumentReference;
+  driverId: string;
+  earningsCents: number;
+  update: Json;
+}): Promise<void> {
+  const driverReference = db.collection("users").doc(params.driverId);
+  const countsTowardTotal = countsTowardCompletedRideReimbursement(
+    params.update.status,
+  );
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(params.reference);
+    const alreadyRecorded = snapshot.data()?.earningsRecordedAt instanceof Timestamp;
+    transaction.update(params.reference, {
+      ...params.update,
+      ...(!alreadyRecorded && countsTowardTotal && params.earningsCents > 0 ? {
+        earningsRecordedAt: FieldValue.serverTimestamp(),
+      } : {}),
+    });
+    if (!alreadyRecorded && countsTowardTotal && params.earningsCents > 0) {
+      transaction.set(driverReference, {
+        totalEarningsCents: FieldValue.increment(params.earningsCents),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
+  });
+}
+
 const removableBookingStatuses = new Set<BookingStatus>([
   "pending_driver",
   "accepted_payment_pending",
@@ -1131,6 +1247,7 @@ async function removeBookingForSafety(
         cancelledAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
+      await releaseBookingCredit(reference);
       return true;
     }
   }
@@ -1282,6 +1399,7 @@ export const cancelSeatBooking = onCall(
         cancelledAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
+      await releaseBookingCredit(reference);
       await notify(String(booking.driverId), "seat_request_cancelled", {bookingId: id});
       return {status: "cancelled", riderRefundCents: 0};
     }
@@ -1344,8 +1462,11 @@ export const cancelSeatBooking = onCall(
       attempt: 1,
       sourceTransaction: typeof booking.chargeId === "string" ? booking.chargeId : undefined,
     });
-    await Promise.all([
-      reference.update({
+    await finalizeBookingWithDriverEarnings({
+      reference,
+      driverId: String(booking.driverId),
+      earningsCents: allocation.driverCents,
+      update: {
         status: "cancelled" satisfies BookingStatus,
         paymentStatus: allocation.riderRefundCents === totalCents ? "refunded" : "partially_refunded",
         cancellationTransferId: transferId,
@@ -1355,9 +1476,9 @@ export const cancelSeatBooking = onCall(
         paidOutAt: transferId ? FieldValue.serverTimestamp() : null,
         cancelledAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
-      }),
-      notify(String(booking.driverId), "confirmed_booking_cancelled", {bookingId: id}),
-    ]);
+      },
+    });
+    await notify(String(booking.driverId), "confirmed_booking_cancelled", {bookingId: id});
     return {status: "cancelled", ...allocation};
   },
 );
@@ -1531,25 +1652,64 @@ export const verifyPickupCode = onCall(
       }
       return {status: "in_progress", estimatedCompletionAt: estimatedEnd.toDate().toISOString()};
     }
-    let completionAt = estimatedEnd;
-    try {
-      completionAt = await refreshLiveTripAfterPickup(String(booking.rideId), id) ?? estimatedEnd;
-      await reference.update({
-        estimatedCompletionAt: completionAt,
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    } catch (error) {
-      logger.warn("Live trip route refresh failed after a valid pickup.", {
-        rideId: booking.rideId,
-        bookingId: id,
-        errorName: error instanceof Error ? error.name : "UnknownError",
-      });
-    }
     await notify(String(booking.riderId), "pickup_confirmed", {
       bookingId: id,
       rideId: String(booking.rideId),
     });
-    return {status: "in_progress", estimatedCompletionAt: completionAt.toDate().toISOString()};
+    return {status: "in_progress", estimatedCompletionAt: estimatedEnd.toDate().toISOString()};
+  },
+);
+
+export const markRiderNoShow = onCall(
+  {region, enforceAppCheck: true, maxInstances: 30},
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireVerifiedUser(request.auth.uid, true);
+    const id = stringValue(object(request.data).bookingId, "Booking", 128);
+    const reference = db.collection("bookings").doc(id);
+    let riderId = "";
+    let rideId = "";
+    await db.runTransaction(async (transaction) => {
+      const bookingSnapshot = await transaction.get(reference);
+      const booking = bookingSnapshot.data();
+      if (!booking || booking.driverId !== request.auth?.uid) {
+        throw new HttpsError("permission-denied", "You cannot mark this rider as a no-show.");
+      }
+      if (booking.riderNoShow === true) return;
+      if (booking.status !== "confirmed") {
+        throw new HttpsError("failed-precondition", "This rider is not waiting for pickup.");
+      }
+      const rideReference = db.collection("rides").doc(String(booking.rideId));
+      const rideSnapshot = await transaction.get(rideReference);
+      const ride = rideSnapshot.data();
+      if (!ride || ride.driverId !== request.auth?.uid || ride.status !== "in_progress") {
+        throw new HttpsError("failed-precondition", "Start the trip before marking a no-show.");
+      }
+      const agreedPickup = booking.departureAt instanceof Timestamp ?
+        booking.departureAt : ride.departureAt;
+      if (!(agreedPickup instanceof Timestamp) ||
+          !canMarkRiderNoShow(agreedPickup.toMillis(), Date.now())) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Wait at least 10 minutes after the agreed pickup time.",
+        );
+      }
+      riderId = String(booking.riderId);
+      rideId = String(booking.rideId);
+      transaction.update(reference, {
+        status: "in_progress" satisfies BookingStatus,
+        riderNoShow: true,
+        riderNoShowAt: FieldValue.serverTimestamp(),
+        ratingSkippedAt: FieldValue.serverTimestamp(),
+        riderRatingSkippedAt: FieldValue.serverTimestamp(),
+        estimatedCompletionAt: Timestamp.now(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+    if (riderId) {
+      await notify(riderId, "rider_marked_no_show", {bookingId: id, rideId});
+    }
+    return {status: "in_progress", riderNoShow: true};
   },
 );
 
@@ -1592,13 +1752,18 @@ async function completeAndPayBooking(
       attempt: Number(booking.payoutAttempt ?? 1),
       sourceTransaction: typeof booking.chargeId === "string" ? booking.chargeId : undefined,
     });
-    await reference.update({
+    await finalizeBookingWithDriverEarnings({
+      reference,
+      driverId: String(booking.driverId),
+      earningsCents: Number(booking.driverPayoutCents ?? booking.baseFareCents),
+      update: {
       status: "completed" satisfies BookingStatus,
       payoutStatus: transferId ? "paid" : "account_required",
       payoutTransferId: transferId,
       completedAt: FieldValue.serverTimestamp(),
       paidOutAt: transferId ? FieldValue.serverTimestamp() : null,
       updatedAt: FieldValue.serverTimestamp(),
+      },
     });
   } catch (error) {
     await reference.update({
@@ -1615,10 +1780,14 @@ async function completeAndPayBooking(
     return false;
   }
   await Promise.all([
-    notify(String(booking.riderId), "trip_completed", {
+    notify(
+      String(booking.riderId),
+      booking.riderNoShow === true ? "no_show_trip_completed" : "trip_completed",
+      {
       bookingId: reference.id,
       rideId: String(booking.rideId),
-    }),
+      },
+    ),
     notify(String(booking.driverId), "payout_released", {
       bookingId: reference.id,
       rideId: String(booking.rideId),
@@ -1826,6 +1995,40 @@ export const rateRider = onCall(
   },
 );
 
+export const dismissRiderRatings = onCall(
+  {region, enforceAppCheck: true, maxInstances: 60},
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    const rawBookingIds = object(request.data).bookingIds;
+    if (!Array.isArray(rawBookingIds) || rawBookingIds.length === 0 ||
+        rawBookingIds.length > 20 || rawBookingIds.some((value) =>
+          typeof value !== "string" || !value.trim() || value.length > 128)) {
+      throw new HttpsError("invalid-argument", "Bookings are required.");
+    }
+    const bookingIds = [...new Set(rawBookingIds.map((value) => String(value).trim()))];
+    await db.runTransaction(async (transaction) => {
+      const references = bookingIds.map((id) => db.collection("bookings").doc(id));
+      const snapshots = await transaction.getAll(...references);
+      for (const snapshot of snapshots) {
+        const booking = snapshot.data();
+        if (!booking || booking.driverId !== request.auth?.uid) {
+          throw new HttpsError("permission-denied", "You cannot update these riders.");
+        }
+        if (!new Set(["completed", "payout_held"]).has(String(booking.status))) {
+          throw new HttpsError("failed-precondition", "Complete the trip first.");
+        }
+      }
+      for (const reference of references) {
+        transaction.update(reference, {
+          riderRatingSkippedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    });
+    return {status: "dismissed", bookingCount: bookingIds.length};
+  },
+);
+
 export const disputeBooking = onCall(
   {region, enforceAppCheck: true, maxInstances: 30},
   async (request) => {
@@ -2008,6 +2211,7 @@ export const expireUnpaidBookings = onSchedule(
         expiredAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
+      await releaseBookingCredit(document.ref);
       await Promise.all([
         notify(String(booking.riderId), "payment_window_expired", {bookingId: document.id}),
         notify(String(booking.driverId), "seat_request_expired", {bookingId: document.id}),

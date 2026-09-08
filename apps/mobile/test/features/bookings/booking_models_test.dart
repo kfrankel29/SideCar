@@ -23,6 +23,7 @@ void main() {
       'totalCents': 5592,
       'paymentStatus': 'paid',
       'pickupCode': '0909',
+      'riderNoShow': true,
       'seatKey': 'rear_left',
       'pickupLocation': {
         'placeId': 'pickup-1',
@@ -43,6 +44,7 @@ void main() {
     expect(booking.status, BookingStatus.confirmed);
     expect(booking.totalLabel, r'$55.92');
     expect(booking.pickupCode, '0909');
+    expect(booking.riderNoShow, isTrue);
     expect(booking.riderPhotoUrl, 'https://example.com/maya.jpg');
     expect(booking.seat, BookingSeat.rearLeft);
     expect(

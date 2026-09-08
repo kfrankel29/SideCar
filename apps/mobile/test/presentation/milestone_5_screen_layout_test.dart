@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/bookings/presentation/trip_rating_screen.dart';
@@ -90,17 +91,42 @@ void main() {
   testWidgets('rider submits the Figma driver rating flow', (tester) async {
     await setPhoneSize(tester);
     final repository = _RatingFake();
+    final router = GoRouter(
+      initialLocation: '/home',
+      routes: [
+        GoRoute(
+          path: '/home',
+          builder: (context, state) => Scaffold(
+            body: Column(
+              children: [
+                const Text('Home destination'),
+                Builder(
+                  builder: (context) => TextButton(
+                    onPressed: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => TripRatingScreen(booking: _booking()),
+                      ),
+                    ),
+                    child: const Text('Open rating'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [bookingRepositoryProvider.overrideWithValue(repository)],
-        child: MaterialApp(
-          theme: AppTheme.light,
-          home: TripRatingScreen(booking: _booking()),
-        ),
+        child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
       ),
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text('Open rating'));
+    await tester.pumpAndSettle();
     expect(find.text('Home safe'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('driver-5')));
     await tester.tap(find.text('Submit rating'));
@@ -109,6 +135,40 @@ void main() {
     expect(repository.ratedTrip, 'booking-1');
     expect(repository.driverRating, 5);
     expect(repository.tripRating, 5);
+    expect(find.text('Home destination'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('rider skips rating and returns home', (tester) async {
+    await setPhoneSize(tester);
+    final repository = _RatingFake();
+    final router = GoRouter(
+      initialLocation: '/rating',
+      routes: [
+        GoRoute(
+          path: '/home',
+          builder: (_, _) => const Scaffold(body: Text('Home destination')),
+        ),
+        GoRoute(
+          path: '/rating',
+          builder: (_, _) => TripRatingScreen(booking: _booking()),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [bookingRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+
+    expect(repository.skippedTrip, 'booking-1');
+    expect(find.text('Home destination'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -131,12 +191,35 @@ void main() {
     expect(find.text('Rate your riders'), findsOneWidget);
     expect(find.text('Nice drive'), findsOneWidget);
     expect(find.text('Maya C.'), findsOneWidget);
+    await tester.tap(find.text('Easy pickup'));
     await tester.tap(find.byKey(const ValueKey('rider-booking-1-5')));
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
     expect(repository.ratedRider, 'booking-1');
     expect(repository.riderRating, 5);
+    expect(repository.riderComment, 'Easy pickup');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('driver can persistently skip rider ratings', (tester) async {
+    await setPhoneSize(tester);
+    final repository = _RatingFake();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [bookingRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: RateRidersScreen(bookings: [_booking()]),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+
+    expect(repository.skippedRiderBookings, ['booking-1']);
     expect(tester.takeException(), isNull);
   });
 
@@ -225,7 +308,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('route stop picker shows selectable Google route gas stations', (
+  testWidgets('route stop picker loads Google route gas stations on request', (
     tester,
   ) async {
     await setPhoneSize(tester);
@@ -247,18 +330,48 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('Gas stations within 1 mile of the route'),
-      findsOneWidget,
+    final map = tester.widget<InteractiveViewer>(
+      find.byKey(const ValueKey('interactive-route-map')),
     );
-    expect(find.text('Central Coast Gas'), findsOneWidget);
+    expect(map.minScale, 1);
+    expect(map.maxScale, greaterThanOrEqualTo(5));
+    expect(find.byTooltip('Zoom in'), findsOneWidget);
+    expect(find.byTooltip('Zoom out'), findsOneWidget);
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('interactive-route-map')))
+          .height,
+      greaterThanOrEqualTo(300),
+    );
+    expect(find.text('Show gas stations'), findsNothing);
+    expect(find.text('Central Coast Gas'), findsNothing);
     expect(find.text('Use this address'), findsNothing);
+    expect(repository.requestedGasStations, isFalse);
+
+    await tester.tap(find.byKey(const ValueKey('route-stop-map')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Show gas stations'), findsOneWidget);
+    await tester.tap(find.text('Show gas stations'));
+    await tester.pumpAndSettle();
+
+    expect(repository.requestedGasStations, isTrue);
+    expect(repository.gasStationRequestCount, 1);
+    expect(find.text('Reload gas stations in this map area'), findsOneWidget);
+    expect(find.text('Gas stations near Dropped pin'), findsOneWidget);
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pumpAndSettle();
+    expect(find.text('Central Coast Gas'), findsOneWidget);
     await tester.tap(find.text('Central Coast Gas'));
     await tester.pumpAndSettle();
 
     expect(repository.selectedPlaceId, 'gas-1');
     expect(find.text('Use this address'), findsOneWidget);
-    expect(find.byIcon(Icons.check_circle), findsOneWidget);
+    expect(find.byIcon(Icons.check_circle), findsWidgets);
+    final requestsBeforeReload = repository.gasStationRequestCount;
+    await tester.tap(find.text('Reload gas stations in this map area'));
+    await tester.pumpAndSettle();
+    expect(repository.gasStationRequestCount, requestsBeforeReload + 1);
     expect(tester.takeException(), isNull);
   });
 
@@ -288,7 +401,67 @@ void main() {
     expect(repository.resolvedLatitude, closeTo(34.42, 0.01));
     expect(repository.resolvedLongitude, closeTo(-119.70, 0.01));
     expect(repository.selectedPlaceId, 'pin-1');
+    expect(find.text('Dropped pin'), findsOneWidget);
     expect(find.text('Use this address'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('route stop picker uses a full results view while typing', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    tester.view.physicalSize = const Size(375, 2000);
+    final repository = _RoutePickerFake();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [rideRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: const Scaffold(
+            body: PlacePickerSheet(
+              title: 'Choose pickup address',
+              initialQuery: '',
+              rideId: 'ride-1',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'palo alto');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(repository.searchQuery, 'palo alto');
+    expect(repository.requestedSearchPlaceIds, isEmpty);
+    expect(find.byKey(const ValueKey('interactive-route-map')), findsNothing);
+    expect(find.text('Choose pickup address'), findsNothing);
+    expect(find.text('Palo Alto'), findsOneWidget);
+    expect(find.text('Palo Alto Junior Museum'), findsOneWidget);
+    expect(find.text('Palo Alto Caltrain'), findsOneWidget);
+    expect(find.text('Palo Alto Airport'), findsOneWidget);
+    expect(find.text('Show gas stations'), findsNothing);
+    expect(find.text('Use this address'), findsNothing);
+    expect(find.text('Central Coast Gas'), findsNothing);
+    expect(find.text('Second Gas'), findsNothing);
+    expect(find.text('Third Gas'), findsNothing);
+    expect(find.text('Hidden Gas'), findsNothing);
+    expect(repository.requestedGasStations, isFalse);
+
+    await tester.tap(find.text('Palo Alto Airport'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('interactive-route-map')), findsOneWidget);
+    expect(find.text('Use this address'), findsOneWidget);
+    expect(find.text('Show gas stations'), findsOneWidget);
+    expect(find.text('Central Coast Gas'), findsNothing);
+
+    await tester.tap(find.text('Show gas stations'));
+    await tester.pumpAndSettle();
+
+    expect(repository.requestedGasStations, isTrue);
+    expect(find.text('Central Coast Gas'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -377,6 +550,19 @@ class _RatingFake extends UnavailableBookingRepository {
   int? tripRating;
   String? ratedRider;
   int? riderRating;
+  String? riderComment;
+  String? skippedTrip;
+  List<String>? skippedRiderBookings;
+
+  @override
+  Future<void> dismissTripRating(String bookingId) async {
+    skippedTrip = bookingId;
+  }
+
+  @override
+  Future<void> dismissRiderRatings(List<String> bookingIds) async {
+    skippedRiderBookings = bookingIds;
+  }
 
   @override
   Future<void> rateTrip({
@@ -398,6 +584,7 @@ class _RatingFake extends UnavailableBookingRepository {
   }) async {
     ratedRider = bookingId;
     riderRating = rating;
+    riderComment = comment;
   }
 }
 
@@ -436,30 +623,106 @@ class _SafetyFake implements SafetyRepository {
 
 class _RoutePickerFake extends UnavailableRideRepository {
   String selectedPlaceId = '';
+  String searchQuery = '';
+  bool requestedGasStations = false;
+  int gasStationRequestCount = 0;
   double? resolvedLatitude;
   double? resolvedLongitude;
+  List<String> requestedSearchPlaceIds = const [];
+
+  static const places = [
+    RidePlacePrediction(
+      placeId: 'place-1',
+      displayName: 'Palo Alto, CA',
+      mainText: 'Palo Alto',
+      secondaryText: 'CA, USA',
+      latitude: 37.4419,
+      longitude: -122.143,
+    ),
+    RidePlacePrediction(
+      placeId: 'place-2',
+      displayName: 'Palo Alto Junior Museum, CA',
+      mainText: 'Palo Alto Junior Museum',
+      secondaryText: 'Palo Alto, CA',
+      latitude: 37.444,
+      longitude: -122.14,
+    ),
+    RidePlacePrediction(
+      placeId: 'place-3',
+      displayName: 'Palo Alto Caltrain, CA',
+      mainText: 'Palo Alto Caltrain',
+      secondaryText: 'Palo Alto, CA',
+      latitude: 37.443,
+      longitude: -122.165,
+    ),
+    RidePlacePrediction(
+      placeId: 'place-4',
+      displayName: 'Palo Alto Airport, CA',
+      mainText: 'Palo Alto Airport',
+      secondaryText: 'Palo Alto, CA',
+      latitude: 37.461,
+      longitude: -122.115,
+    ),
+  ];
+
+  @override
+  Future<List<RidePlacePrediction>> searchPlaces(String query) async {
+    searchQuery = query;
+    return places;
+  }
 
   @override
   Future<RideStopPickerContext> getRideStopPickerContext(
     String rideId, {
     String selectedPlaceId = '',
+    List<String> searchPlaceIds = const [],
+    bool includeGasStations = false,
+    String gasStationQuery = '',
+    double? gasStationLatitude,
+    double? gasStationLongitude,
   }) async {
     this.selectedPlaceId = selectedPlaceId;
-    return const RideStopPickerContext(
+    requestedSearchPlaceIds = searchPlaceIds;
+    requestedGasStations = includeGasStations;
+    if (includeGasStations) gasStationRequestCount += 1;
+    return RideStopPickerContext(
       mapPreviewUrl: '',
       mapCenterLatitude: 34.42,
       mapCenterLongitude: -119.70,
       mapZoom: 10,
       mapWidth: 640,
       mapHeight: 352,
-      gasStations: [
-        RidePlacePrediction(
-          placeId: 'gas-1',
-          displayName: 'Central Coast Gas, Goleta, CA',
-          mainText: 'Central Coast Gas',
-          secondaryText: 'Goleta, CA · 0.4 mi from route',
-        ),
-      ],
+      gasStations: includeGasStations
+          ? const [
+              RidePlacePrediction(
+                placeId: 'gas-1',
+                displayName: 'Central Coast Gas, Goleta, CA',
+                mainText: 'Central Coast Gas',
+                secondaryText: 'Goleta, CA · 0.4 mi from route',
+              ),
+              RidePlacePrediction(
+                placeId: 'gas-2',
+                displayName: 'Second Gas, Goleta, CA',
+                mainText: 'Second Gas',
+                secondaryText: 'Goleta, CA · 0.5 mi from route',
+              ),
+              RidePlacePrediction(
+                placeId: 'gas-3',
+                displayName: 'Third Gas, Goleta, CA',
+                mainText: 'Third Gas',
+                secondaryText: 'Goleta, CA · 0.6 mi from route',
+              ),
+              RidePlacePrediction(
+                placeId: 'gas-4',
+                displayName: 'Hidden Gas, Goleta, CA',
+                mainText: 'Hidden Gas',
+                secondaryText: 'Goleta, CA · 0.7 mi from route',
+              ),
+            ]
+          : const [],
+      searchResults: places
+          .where((place) => searchPlaceIds.contains(place.placeId))
+          .toList(growable: false),
     );
   }
 

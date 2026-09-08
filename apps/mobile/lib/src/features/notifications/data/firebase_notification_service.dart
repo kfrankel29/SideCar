@@ -101,6 +101,14 @@ class FirebaseNotificationService implements NotificationService {
       });
     }
 
+    if (Platform.isIOS) {
+      await _messaging.setForegroundNotificationPresentationOptions(
+        alert: false,
+        badge: false,
+        sound: false,
+      );
+    }
+
     final initialMessage = await _messaging.getInitialMessage();
     if (initialMessage != null) {
       scheduleMicrotask(
@@ -108,7 +116,10 @@ class FirebaseNotificationService implements NotificationService {
             _actions.add(NotificationAction(_stringData(initialMessage.data))),
       );
     }
-    if (_auth.currentUser != null) await refreshRegistration();
+    // APNs can take several seconds to provide a token after launch. Keep
+    // registration retryable, but do not hold notification initialization (or
+    // the app's startup flow) while iOS finishes provisioning the token.
+    if (_auth.currentUser != null) unawaited(refreshRegistration());
   }
 
   @override
@@ -123,10 +134,11 @@ class FirebaseNotificationService implements NotificationService {
       );
       if (settings.authorizationStatus == AuthorizationStatus.denied) return;
       if (Platform.isIOS) {
-        for (var attempt = 0; attempt < 20; attempt++) {
+        for (var attempt = 0; attempt < 60; attempt++) {
           if (await _messaging.getAPNSToken() != null) break;
-          await Future<void>.delayed(const Duration(milliseconds: 250));
+          await Future<void>.delayed(const Duration(milliseconds: 500));
         }
+        if (await _messaging.getAPNSToken() == null) return;
       }
       final token = await _messaging.getToken();
       if (token != null && token.isNotEmpty) await _registerToken(token);
@@ -137,6 +149,42 @@ class FirebaseNotificationService implements NotificationService {
     } on TimeoutException {
       return;
     } on PlatformException {
+      return;
+    }
+  }
+
+  @override
+  Future<int> unreadRideUpdateCount() async {
+    if (_auth.currentUser == null) return 0;
+    try {
+      final result = await _functions
+          .httpsCallable('getRideNotificationState')
+          .call<Map<Object?, Object?>>()
+          .timeout(const Duration(seconds: 10));
+      final count = result.data['unreadCount'];
+      return count is num ? count.toInt() : 0;
+    } on FirebaseFunctionsException {
+      return 0;
+    } on SocketException {
+      return 0;
+    } on TimeoutException {
+      return 0;
+    }
+  }
+
+  @override
+  Future<void> markRideUpdatesRead() async {
+    if (_auth.currentUser == null) return;
+    try {
+      await _functions
+          .httpsCallable('markRideNotificationsRead')
+          .call<void>()
+          .timeout(const Duration(seconds: 10));
+    } on FirebaseFunctionsException {
+      return;
+    } on SocketException {
+      return;
+    } on TimeoutException {
       return;
     }
   }

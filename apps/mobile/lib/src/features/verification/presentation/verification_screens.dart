@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
@@ -73,17 +74,6 @@ class VerificationHubScreen extends ConsumerWidget {
               complete: summary.vehicleComplete,
               onTap: () => context.push(AppRoutes.vehicleProfile),
             ),
-            const SizedBox(height: 12),
-            _VerificationTile(
-              icon: Icons.car_crash_outlined,
-              title: 'Verify car insurance',
-              subtitle: _statusText(
-                summary.insurance,
-                idle: 'Automatic check through Axle',
-              ),
-              complete: summary.insuranceComplete,
-              onTap: () => context.push(AppRoutes.insuranceVerification),
-            ),
           ],
           if (verification.isLoading) ...[
             const SizedBox(height: 18),
@@ -127,8 +117,6 @@ class VerificationHubScreen extends ConsumerWidget {
       );
     } else if (role == PrimaryRole.driver && !summary.vehicleComplete) {
       context.push(AppRoutes.vehicleProfile);
-    } else if (role == PrimaryRole.driver && !summary.insuranceComplete) {
-      context.push(AppRoutes.insuranceVerification);
     }
   }
 }
@@ -189,7 +177,7 @@ class _VerificationTile extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, size: 22),
+            const FinalDraftChevronIcon(size: 18),
           ],
         ),
       ),
@@ -444,7 +432,7 @@ class _DocumentRequirement extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded),
+            const FinalDraftChevronIcon(size: 18),
           ],
         ),
       ),
@@ -466,7 +454,6 @@ class _VehicleProfileScreenState extends ConsumerState<VehicleProfileScreen> {
   final _makeAndModel = TextEditingController();
   final _color = TextEditingController();
   final _plate = TextEditingController();
-  final _picker = ImagePicker();
   String _photoUrl = '';
   bool _loading = true;
   bool _saving = false;
@@ -509,10 +496,6 @@ class _VehicleProfileScreenState extends ConsumerState<VehicleProfileScreen> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_photoUrl.isEmpty) {
-      setState(() => _error = 'Add a clear exterior vehicle photo.');
-      return;
-    }
     final makeAndModel = _splitMakeAndModel(_makeAndModel.text);
     setState(() {
       _saving = true;
@@ -533,60 +516,6 @@ class _VehicleProfileScreenState extends ConsumerState<VehicleProfileScreen> {
           );
       ref.invalidate(currentVerificationProvider);
       if (mounted) context.pop();
-    } on AppFailure catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _chooseVehiclePhoto() async {
-    try {
-      final source = await showModalBottomSheet<ImageSource>(
-        context: context,
-        builder: (context) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.camera_alt_outlined),
-                title: const Text('Take a photo'),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Choose from library'),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (source == null || !mounted) return;
-      final image = await _picker.pickImage(
-        source: source,
-        imageQuality: 88,
-        maxWidth: 2200,
-      );
-      if (image == null) return;
-      setState(() {
-        _saving = true;
-        _error = null;
-      });
-      final url = await ref
-          .read(verificationRepositoryProvider)
-          .uploadVehiclePhoto(
-            bytes: await image.readAsBytes(),
-            contentType: image.mimeType ?? 'image/jpeg',
-          );
-      if (mounted) setState(() => _photoUrl = url);
-    } on PlatformException {
-      if (mounted) {
-        setState(
-          () => _error =
-              'Allow camera or photo access in Settings and try again.',
-        );
-      }
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
@@ -678,15 +607,6 @@ class _VehicleProfileScreenState extends ConsumerState<VehicleProfileScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            _DocumentAction(
-              icon: Icons.directions_car_outlined,
-              title: 'Vehicle photo',
-              subtitle: _photoUrl.isEmpty
-                  ? 'Add a clear exterior photo'
-                  : 'Photo added',
-              onTap: _chooseVehiclePhoto,
-            ),
             SideCarErrorText(_error),
           ],
         ),
@@ -773,7 +693,7 @@ class _InsuranceVerificationScreenState
           summary.insuranceComplete
               ? () => context.pop()
               : manualReviewAvailable
-              ? () => context.push(AppRoutes.insuranceFallback)
+              ? () => context.go(AppRoutes.verification)
               : null,
         ),
         child: Text(
@@ -1023,7 +943,7 @@ class _DocumentAction extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded),
+            const FinalDraftChevronIcon(size: 18),
           ],
         ),
       ),

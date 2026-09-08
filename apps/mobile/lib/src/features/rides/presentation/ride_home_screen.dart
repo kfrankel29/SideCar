@@ -7,6 +7,7 @@ import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/navigation/domain/tab_activation.dart';
+import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/live_trip_screen.dart';
@@ -188,14 +189,20 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
           await Future.wait<Object?>([_rides!, _activeRide!]);
         },
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 18, 24, 28),
+          padding: const EdgeInsets.fromLTRB(24, 15, 24, 28),
           children: [
             Row(
               children: [
                 Expanded(
                   child: Text(
                     'Hey, ${profile?.firstName ?? 'there'}',
-                    style: Theme.of(context).textTheme.headlineLarge,
+                    style: const TextStyle(
+                      fontFamily: 'Arial',
+                      color: AppColors.ink,
+                      fontSize: 24,
+                      height: 1.08,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 Semantics(
@@ -207,13 +214,13 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
                     child: RideAvatar(
                       initials: _initials(profile),
                       photoUrl: profile?.photoUrl ?? '',
-                      radius: 22,
+                      radius: 20,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 10),
             if (role == PrimaryRole.driver)
               _DriverHome(
                 rides: _rides!,
@@ -282,7 +289,7 @@ class _RiderHome extends StatelessWidget {
             ),
             child: const Row(
               children: [
-                Icon(Icons.search_rounded, color: AppColors.mutedInk),
+                FinalDraftAssetIcon('search', color: AppColors.mutedInk),
                 SizedBox(width: 8),
                 Text('Where to?', style: TextStyle(color: AppColors.mutedInk)),
               ],
@@ -305,7 +312,7 @@ class _RiderHome extends StatelessWidget {
               ),
               const Padding(
                 padding: EdgeInsets.all(12),
-                child: Icon(Icons.chevron_right_rounded),
+                child: FinalDraftChevronIcon(size: 17),
               ),
             ],
           ),
@@ -339,7 +346,7 @@ class _RiderHome extends StatelessWidget {
             return Column(
               children: [
                 for (final ride in values.take(3)) ...[
-                  RideCard(
+                  _RiderLeavingSoonRideCard(
                     ride: ride,
                     onTap: () => context.push('/rides/${ride.id}'),
                   ),
@@ -352,6 +359,16 @@ class _RiderHome extends StatelessWidget {
       ],
     );
   }
+}
+
+class _RiderLeavingSoonRideCard extends StatelessWidget {
+  const _RiderLeavingSoonRideCard({required this.ride, required this.onTap});
+
+  final Ride ride;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => RideCard(ride: ride, onTap: onTap);
 }
 
 class _UpcomingBookingsSection extends StatelessWidget {
@@ -373,11 +390,8 @@ class _UpcomingBookingsSection extends StatelessWidget {
               .where(
                 (booking) =>
                     !booking.departureAt.isBefore(now) &&
-                    const {
-                      BookingStatus.acceptedPaymentPending,
-                      BookingStatus.paymentProcessing,
-                      BookingStatus.confirmed,
-                    }.contains(booking.status),
+                    booking.status == BookingStatus.confirmed &&
+                    booking.paymentStatus == 'paid',
               )
               .toList(growable: false)
             ..sort(
@@ -395,33 +409,22 @@ class _UpcomingBookingsSection extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             for (final booking in values.take(2)) ...[
-              InkWell(
-                borderRadius: BorderRadius.circular(12),
+              RideSummaryCard(
+                origin: booking.originName,
+                destination: booking.destinationName,
+                dateLabel: formatShortDate(booking.departureAt),
+                timeLabel: formatTime(booking.departureAt),
+                priceLabel: '\$${(booking.baseFareCents / 100).round()}',
+                bookedLabel: 'Confirmed',
+                profileName: booking.driverName,
+                profileInitials: booking.driverName
+                    .split(' ')
+                    .take(2)
+                    .map((part) => part.isEmpty ? '' : part[0])
+                    .join(),
+                profilePhotoUrl: booking.driverPhotoUrl,
+                keyPrefix: 'home-booking-${booking.id}',
                 onTap: () => context.push('/rides/${booking.rideId}'),
-                child: Container(
-                  padding: const EdgeInsets.all(15),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border.all(color: AppColors.border),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${booking.originName} → ${booking.destinationName}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _bookingDate(booking.departureAt),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
               ),
               const SizedBox(height: 10),
             ],
@@ -430,14 +433,6 @@ class _UpcomingBookingsSection extends StatelessWidget {
       );
     },
   );
-
-  static String _bookingDate(DateTime value) {
-    final local = value.toLocal();
-    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
-    final minute = local.minute.toString().padLeft(2, '0');
-    final suffix = local.hour >= 12 ? 'PM' : 'AM';
-    return '${local.month}/${local.day} · $hour:$minute $suffix';
-  }
 }
 
 class _DriverHome extends StatelessWidget {
@@ -464,9 +459,10 @@ class _DriverHome extends StatelessWidget {
           onTap: () => context.go(AppRoutes.postRide),
           borderRadius: BorderRadius.circular(12),
           child: Container(
-            padding: const EdgeInsets.fromLTRB(18, 18, 16, 18),
+            height: 74,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             decoration: BoxDecoration(
-              color: AppColors.ink,
+              color: AppColors.primary,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -474,53 +470,54 @@ class _DriverHome extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'Post your next ride',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.titleLarge?.copyWith(color: Colors.white),
+                    style: const TextStyle(
+                      fontFamily: 'Arial',
+                      color: Colors.white,
+                      fontSize: 18,
+                      height: 1.15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2A292F),
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: const Icon(Icons.add_rounded, color: Colors.white),
-                ),
+                const FinalDraftAssetIcon('add-square', size: 40),
               ],
             ),
           ),
         ),
-        const SizedBox(height: 15),
+        const SizedBox(height: 24),
         Row(
           children: [
             Expanded(
               child: _StatCard(
                 value: _money(profile?.totalEarningsCents ?? 0),
-                label: 'Total Earnings',
+                label: 'Total reimbursed',
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: _StatCard(
-                value:
-                    '${(profile?.rating ?? 0) > 0 ? profile!.rating.toStringAsFixed(1) : '—'} · ${profile?.tripCount ?? 0}',
-                label: 'Rating · trips',
+                value: '${profile?.tripCount ?? 0}',
+                label: 'Total trips',
               ),
             ),
           ],
         ),
-        const SizedBox(height: 26),
+        const SizedBox(height: 24),
         _LiveRideSection(activeRide: activeRide),
         Row(
           children: [
             Expanded(
               child: Text(
-                'Your upcoming rides',
+                'Your upcoming ride',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleLarge,
+                style: const TextStyle(
+                  fontFamily: 'Arial',
+                  color: AppColors.ink,
+                  fontSize: 18,
+                  height: 1.15,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
             if (pendingRequests > 0) ...[
@@ -563,23 +560,9 @@ class _DriverHome extends StatelessWidget {
             return Column(
               children: [
                 for (var index = 0; index < values.length; index++) ...[
-                  InkWell(
+                  _DriverUpcomingRideCard(
+                    ride: values[index],
                     onTap: () => context.push('/rides/${values[index].id}'),
-                    child: Container(
-                      height: 150,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: AppColors.border),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: RideRouteCard(
-                        origin: values[index].origin.displayName,
-                        destination: values[index].destination.displayName,
-                        originSubtitle:
-                            '${formatShortDate(values[index].departureAt)} · ${formatTime(values[index].departureAt)}',
-                        destinationSubtitle: 'Upcoming',
-                      ),
-                    ),
                   ),
                   if (index != values.length - 1) const SizedBox(height: 12),
                 ],
@@ -596,6 +579,30 @@ class _DriverHome extends StatelessWidget {
     return dollars == dollars.roundToDouble()
         ? '\$${dollars.toStringAsFixed(0)}'
         : '\$${dollars.toStringAsFixed(2)}';
+  }
+}
+
+class _DriverUpcomingRideCard extends StatelessWidget {
+  const _DriverUpcomingRideCard({required this.ride, required this.onTap});
+
+  final Ride ride;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => RideSummaryCard(
+    key: ValueKey('driver-upcoming-card-${ride.id}'),
+    origin: ride.origin.displayName,
+    destination: ride.destination.displayName,
+    dateLabel: _displayDate(ride.departureAt),
+    timeLabel: formatTime(ride.departureAt),
+    priceLabel: ride.priceLabel,
+    bookedLabel: '${ride.bookedSeats}/${ride.seatsTotal} booked',
+    keyPrefix: 'driver-upcoming-${ride.id}',
+    onTap: onTap,
+  );
+
+  String _displayDate(DateTime value) {
+    return formatShortDate(value);
   }
 }
 
@@ -649,8 +656,8 @@ class _LiveRideSection extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.fromLTRB(16, 15, 14, 15),
                     decoration: BoxDecoration(
-                      color: AppColors.softSurface,
-                      border: Border.all(color: AppColors.border),
+                      color: AppColors.primary,
+                      border: Border.all(color: AppColors.primary),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
@@ -670,22 +677,26 @@ class _LiveRideSection extends StatelessWidget {
                             children: [
                               Text(
                                 '${value.ride.origin.displayName} → ${value.ride.destination.displayName}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium,
+                                softWrap: true,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(color: Colors.white),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 value.isDriver
                                     ? 'Trip in progress · View route and riders'
                                     : 'Trip in progress · View live ride details',
-                                style: Theme.of(context).textTheme.bodySmall,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: Colors.white),
                               ),
                             ],
                           ),
                         ),
                         const SizedBox(width: 8),
-                        const Icon(Icons.chevron_right_rounded),
+                        const FinalDraftChevronIcon(
+                          size: 17,
+                          color: Colors.white,
+                        ),
                       ],
                     ),
                   ),
@@ -708,18 +719,37 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 76,
+      height: 67,
       alignment: Alignment.center,
       decoration: BoxDecoration(
+        color: Colors.white,
         border: Border.all(color: AppColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(value, style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            value,
+            style: const TextStyle(
+              fontFamily: 'Arial',
+              color: AppColors.ink,
+              fontSize: 18,
+              height: 1,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            label,
+            style: const TextStyle(
+              fontFamily: 'Arial',
+              color: AppColors.mutedInk,
+              fontSize: 11,
+              height: 1.1,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
         ],
       ),
     );

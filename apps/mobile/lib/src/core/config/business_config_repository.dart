@@ -43,7 +43,7 @@ class FirebaseBusinessConfigRepository implements BusinessConfigRepository {
   static const _displayFallbacks = <String, Object>{
     RemoteConfigKeys.configVersion: 'local-default',
     RemoteConfigKeys.serviceFeeType: 'percentage',
-    RemoteConfigKeys.serviceFeeValue: 8.0,
+    RemoteConfigKeys.serviceFeeValue: 5.0,
     RemoteConfigKeys.irsMileageRate: 0.0,
     RemoteConfigKeys.pricingMode: 'driver_sets_under_cap',
     RemoteConfigKeys.refundRules:
@@ -185,7 +185,7 @@ class MemoryBusinessConfigRepository implements BusinessConfigRepository {
 BusinessConfig localDisplayConfig() {
   return BusinessConfig(
     serviceFeeType: ServiceFeeType.percentage,
-    serviceFeeValue: 8,
+    serviceFeeValue: 5,
     irsMileageRate: 0,
     pricingMode: PricingMode.driverSetsUnderCap,
     paymentExpirationHours: 24,

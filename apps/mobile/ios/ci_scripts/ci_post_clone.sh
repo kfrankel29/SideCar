@@ -7,6 +7,8 @@ app_path="$repository_path/apps/mobile"
 ios_path="$app_path/ios"
 firebase_plist="$ios_path/Runner/GoogleService-Info.plist"
 google_auth_config="$ios_path/Flutter/GoogleAuth.xcconfig"
+flutter_revision="ff37bef603469fb030f2b72995ab929ccfc227f0"
+flutter_root="$HOME/flutter-$flutter_revision"
 
 required_firebase_variables="
 FIREBASE_IOS_CLIENT_ID
@@ -32,7 +34,7 @@ done
 /usr/bin/plutil -insert API_KEY -string "$FIREBASE_IOS_API_KEY" "$firebase_plist"
 /usr/bin/plutil -insert GCM_SENDER_ID -string "$FIREBASE_IOS_GCM_SENDER_ID" "$firebase_plist"
 /usr/bin/plutil -insert PLIST_VERSION -string "1" "$firebase_plist"
-/usr/bin/plutil -insert BUNDLE_ID -string "com.kaileefrankel.sidecar" "$firebase_plist"
+/usr/bin/plutil -insert BUNDLE_ID -string "com.ridesidecar.app" "$firebase_plist"
 /usr/bin/plutil -insert PROJECT_ID -string "$FIREBASE_IOS_PROJECT_ID" "$firebase_plist"
 /usr/bin/plutil -insert STORAGE_BUCKET -string "$FIREBASE_IOS_STORAGE_BUCKET" "$firebase_plist"
 /usr/bin/plutil -insert IS_ADS_ENABLED -bool false "$firebase_plist"
@@ -44,7 +46,7 @@ done
 /usr/bin/plutil -lint "$firebase_plist"
 
 bundle_id=$(/usr/libexec/PlistBuddy -c "Print :BUNDLE_ID" "$firebase_plist")
-if [ "$bundle_id" != "com.kaileefrankel.sidecar" ]; then
+if [ "$bundle_id" != "com.ridesidecar.app" ]; then
   echo "Firebase configuration bundle identifier does not match SideCar." >&2
   exit 1
 fi
@@ -55,19 +57,18 @@ google_reversed_client_id=$(
 printf 'GOOGLE_REVERSED_CLIENT_ID=%s\n' "$google_reversed_client_id" \
   > "$google_auth_config"
 
-if ! command -v flutter >/dev/null 2>&1; then
-  git clone \
-    --depth 1 \
-    --branch stable \
-    https://github.com/flutter/flutter.git \
-    "$HOME/flutter"
-  export PATH="$HOME/flutter/bin:$PATH"
+if [ ! -x "$flutter_root/bin/flutter" ]; then
+  git init "$flutter_root"
+  git -C "$flutter_root" remote add origin https://github.com/flutter/flutter.git
+  git -C "$flutter_root" fetch --depth 1 origin "$flutter_revision"
+  git -C "$flutter_root" checkout --detach FETCH_HEAD
 fi
+export PATH="$flutter_root/bin:$PATH"
 
 flutter precache --ios
 
 cd "$app_path"
-flutter pub get
+flutter pub get --enforce-lockfile
 
 if ! command -v pod >/dev/null 2>&1; then
   HOMEBREW_NO_AUTO_UPDATE=1 brew install cocoapods

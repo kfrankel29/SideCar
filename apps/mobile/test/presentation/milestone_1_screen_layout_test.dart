@@ -94,6 +94,36 @@ void main() {
     expect(find.text('Enter a valid age'), findsOneWidget);
   });
 
+  testWidgets('password fields expose working visibility controls', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(
+            const UnavailableAuthRepository(),
+          ),
+        ],
+        child: MaterialApp(theme: AppTheme.light, home: const LoginScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final passwordField = find.byType(TextFormField).last;
+    final passwordInput = find.descendant(
+      of: passwordField,
+      matching: find.byType(EditableText),
+    );
+    expect(tester.widget<EditableText>(passwordInput).obscureText, isTrue);
+    expect(find.byTooltip('Show password'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Show password'));
+    await tester.pump();
+
+    expect(tester.widget<EditableText>(passwordInput).obscureText, isFalse);
+    expect(find.byTooltip('Hide password'), findsOneWidget);
+  });
+
   testWidgets('profile photo offers camera and photo library', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -150,7 +180,7 @@ void main() {
     expect(find.text('Add a profile photo to continue.'), findsOneWidget);
   });
 
-  testWidgets('selected spoken language saves and profile setup completes', (
+  testWidgets('profile setup shows and preserves the selected language', (
     tester,
   ) async {
     final repository = _MemoryProfileRepository(
@@ -182,14 +212,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byType(DropdownButtonFormField<String>).last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Spanish').last);
-    await tester.pumpAndSettle();
+    expect(find.text('Language'), findsOneWidget);
+    expect(find.text('English'), findsOneWidget);
+
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pumpAndSettle();
 
-    expect(repository.profile?.language, 'Spanish');
+    expect(repository.profile?.language, 'English');
     expect(find.text('Profile saved'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
@@ -251,6 +280,8 @@ class _SignedInAuth implements AuthRepository {
     required String lastName,
     required String email,
     required String password,
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
   }) => throw UnimplementedError();
 
   @override
@@ -260,7 +291,10 @@ class _SignedInAuth implements AuthRepository {
   }) => throw UnimplementedError();
 
   @override
-  Future<AccountUser> signInWithGoogle() => throw UnimplementedError();
+  Future<AccountUser> signInWithGoogle({
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
+  }) => throw UnimplementedError();
 
   @override
   Future<void> resendEmailVerificationCode() => throw UnimplementedError();

@@ -1,6 +1,7 @@
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {defineSecret} from "firebase-functions/params";
+import {onDocumentUpdated} from "firebase-functions/v2/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 import {
   RouteWaypoint,
@@ -90,6 +91,20 @@ function publicPlan(value: unknown): Json {
   };
 }
 
+async function notifyRider(
+  riderId: string,
+  type: string,
+  data: Json,
+): Promise<void> {
+  await db.collection("notifications").add({
+    userId: riderId,
+    type,
+    data,
+    read: false,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
 async function mapsRoute(
   origin: TripLocation,
   destination: TripLocation,
@@ -148,7 +163,8 @@ async function tripBookings(rideId: string): Promise<TripBooking[]> {
     .get();
   return snapshot.docs
     .filter((document) => ["confirmed", "in_progress", "completed"]
-      .includes(String(document.data().status)))
+      .includes(String(document.data().status)) &&
+      document.data().riderNoShow !== true)
     .map((document) => {
       const booking = document.data();
       return {
@@ -292,6 +308,11 @@ export const startLiveTrip = onCall(
       }
     });
     const saved = (await reference.get()).data();
+    await Promise.all(bookings.map((booking) =>
+      notifyRider(booking.riderId, "trip_started", {
+        rideId,
+        bookingId: booking.id,
+      })));
     return {liveTrip: publicPlan(saved?.liveTrip ?? liveTrip)};
   },
 );
@@ -364,6 +385,13 @@ export async function refreshLiveTripAfterPickup(
   const liveTrip = object(ride.liveTrip);
   const pickupStops = Array.isArray(liveTrip.pickupStops) ?
     liveTrip.pickupStops.map((item) => object(item)) : [];
+  const existingPickup = pickupStops.find((item) => item.bookingId === bookingId);
+  if (existingPickup?.completedAt instanceof Timestamp) {
+    const existingDropoffs = Array.isArray(liveTrip.dropoffStops) ?
+      liveTrip.dropoffStops.map(object) : [];
+    const existingDropoff = existingDropoffs.find((item) => item.bookingId === bookingId);
+    return existingDropoff?.eta instanceof Timestamp ? existingDropoff.eta : null;
+  }
   const completedAt = Timestamp.now();
   const updatedPickups = pickupStops.map((item) => item.bookingId === bookingId ?
     {...item, completedAt} : item);
@@ -404,3 +432,31 @@ export async function refreshLiveTripAfterPickup(
   const riderDropoff = dropoffStops.map(object).find((item) => item.bookingId === bookingId);
   return riderDropoff?.eta instanceof Timestamp ? riderDropoff.eta : null;
 }
+
+export const refreshLiveTripOnPickup = onDocumentUpdated(
+  {
+    region,
+    document: "bookings/{bookingId}",
+    secrets: [liveTripMapsSecret],
+    maxInstances: 30,
+    retry: true,
+  },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after ||
+        before.status !== "confirmed" || after.status !== "in_progress") return;
+    const rideId = typeof after.rideId === "string" ? after.rideId : "";
+    if (!rideId) return;
+    const completionAt = await refreshLiveTripAfterPickup(
+      rideId,
+      event.params.bookingId,
+    );
+    if (completionAt) {
+      await event.data?.after.ref.update({
+        estimatedCompletionAt: completionAt,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+  },
+);

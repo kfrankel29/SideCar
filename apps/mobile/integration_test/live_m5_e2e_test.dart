@@ -1,9 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/core/firebase/app_bootstrap.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
+import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/safety/domain/safety_repository.dart';
 
 void main() {
@@ -13,6 +15,7 @@ void main() {
   const firstPassword = String.fromEnvironment('M5_E2E_FIRST_PASSWORD');
   const secondEmail = String.fromEnvironment('M5_E2E_SECOND_EMAIL');
   const secondPassword = String.fromEnvironment('M5_E2E_SECOND_PASSWORD');
+  const qaRouteId = String.fromEnvironment('QA_ROUTE_ID');
 
   testWidgets('validates live Milestone 5 services across both accounts', (
     tester,
@@ -21,6 +24,7 @@ void main() {
     expect(firstPassword, isNotEmpty);
     expect(secondEmail, isNotEmpty);
     expect(secondPassword, isNotEmpty);
+    expect(qaRouteId, isNotEmpty);
 
     final bootstrap = await AppBootstrap.initialize();
     expect(bootstrap.firebaseReady, isTrue);
@@ -37,6 +41,47 @@ void main() {
     );
     final driver = first.role == PrimaryRole.driver ? first : second;
     final rider = identical(driver, first) ? second : first;
+
+    await _signIn(bootstrap, driver);
+    final routeRide =
+        (await bootstrap.rideRepository.listMyRides(forceRefresh: true))
+            .where(_supportsStopPicker)
+            .where((ride) => ride.id == qaRouteId)
+            .firstOrNull;
+    expect(routeRide, isNotNull);
+    final initialStopPicker = await bootstrap.rideRepository
+        .getRideStopPickerContext(routeRide!.id)
+        .timeout(const Duration(seconds: 30));
+    expect(initialStopPicker.mapPreviewUrl, isNotEmpty);
+    expect(initialStopPicker.routePoints, isNotEmpty);
+    expect(initialStopPicker.gasStations, isEmpty);
+    final stopPickerWithGas = await bootstrap.rideRepository
+        .getRideStopPickerContext(routeRide.id, includeGasStations: true)
+        .timeout(const Duration(seconds: 30));
+    expect(stopPickerWithGas.mapPreviewUrl, isNotEmpty);
+    expect(stopPickerWithGas.routePoints, isNotEmpty);
+    expect(stopPickerWithGas.gasStations, isNotEmpty);
+    final sanJosePlaces = await bootstrap.rideRepository.searchPlaces(
+      'San Jose',
+    );
+    expect(sanJosePlaces, isNotEmpty);
+    final sanJoseGasStations = await bootstrap.rideRepository
+        .getRideStopPickerContext(
+          routeRide.id,
+          searchPlaceIds: sanJosePlaces
+              .map((place) => place.placeId)
+              .toList(growable: false),
+          includeGasStations: true,
+          gasStationQuery: 'San Jose',
+        )
+        .timeout(const Duration(seconds: 30));
+    expect(sanJoseGasStations.gasStations, isNotEmpty);
+    expect(
+      sanJoseGasStations.gasStations.every(
+        (station) => station.displayName.toLowerCase().contains('ca'),
+      ),
+      isTrue,
+    );
 
     await _signIn(bootstrap, rider);
     final conversation = await bootstrap.messagingRepository
@@ -144,6 +189,10 @@ bool _isCompleted(SeatBooking booking) =>
     booking.status == BookingStatus.completed ||
     booking.status == BookingStatus.payoutHeld;
 
+bool _supportsStopPicker(Ride ride) =>
+    (ride.status == 'published' || ride.status == 'in_progress') &&
+    ride.encodedPolyline.isNotEmpty;
+
 Future<_Account> _account(
   AppBootstrapResult bootstrap, {
   required String email,
@@ -171,6 +220,12 @@ Future<void> _signIn(AppBootstrapResult bootstrap, _Account account) async {
     email: account.email,
     password: account.password,
   );
+  final user = FirebaseAuth.instance.currentUser;
+  expect(user, isNotNull);
+  expect(user!.uid, account.id);
+  final token = await user.getIdToken(true);
+  expect(token, isNotEmpty);
+  await Future<void>.delayed(const Duration(milliseconds: 250));
 }
 
 class _Account {

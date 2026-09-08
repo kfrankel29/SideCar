@@ -1,3 +1,7 @@
+import 'dart:math' as math;
+
+const _gasStationRouteMaximumMiles = 0.5;
+
 enum LuggageAllowance {
   backpack('backpack', 'Backpack'),
   oneSuitcase('one_suitcase', '1 suitcase'),
@@ -86,6 +90,8 @@ class RideStopPickerContext {
   const RideStopPickerContext({
     required this.mapPreviewUrl,
     required this.gasStations,
+    this.searchResults = const [],
+    this.routePoints = const [],
     this.mapCenterLatitude = 0,
     this.mapCenterLongitude = 0,
     this.mapZoom = 0,
@@ -95,6 +101,8 @@ class RideStopPickerContext {
 
   final String mapPreviewUrl;
   final List<RidePlacePrediction> gasStations;
+  final List<RidePlacePrediction> searchResults;
+  final List<RideCoordinate> routePoints;
   final double mapCenterLatitude;
   final double mapCenterLongitude;
   final int mapZoom;
@@ -102,12 +110,34 @@ class RideStopPickerContext {
   final int mapHeight;
 
   factory RideStopPickerContext.fromJson(Map<String, dynamic> json) {
+    final routePoints = _list(json['routePoints'])
+        .map((item) => RideCoordinate.fromJson(_map(item)))
+        .where((point) => point.isValid)
+        .toList(growable: false);
+    final gasStations = _list(json['gasStations'])
+        .map((item) => RidePlacePrediction.fromJson(_map(item)))
+        .where((place) => place.placeId.isNotEmpty)
+        .where(
+          (place) =>
+              routePoints.length < 2 ||
+              _distanceMilesToRoute(
+                    RideCoordinate(
+                      latitude: place.latitude,
+                      longitude: place.longitude,
+                    ),
+                    routePoints,
+                  ) <=
+                  _gasStationRouteMaximumMiles,
+        )
+        .toList(growable: false);
     return RideStopPickerContext(
       mapPreviewUrl: json['mapPreviewUrl'] as String? ?? '',
-      gasStations: _list(json['gasStations'])
+      gasStations: gasStations,
+      searchResults: _list(json['searchResults'])
           .map((item) => RidePlacePrediction.fromJson(_map(item)))
           .where((place) => place.placeId.isNotEmpty)
           .toList(growable: false),
+      routePoints: routePoints,
       mapCenterLatitude:
           (_map(json['mapCenter'])['latitude'] as num?)?.toDouble() ?? 0,
       mapCenterLongitude:
@@ -115,6 +145,57 @@ class RideStopPickerContext {
       mapZoom: (json['mapZoom'] as num?)?.toInt() ?? 0,
       mapWidth: (json['mapWidth'] as num?)?.toInt() ?? 640,
       mapHeight: (json['mapHeight'] as num?)?.toInt() ?? 352,
+    );
+  }
+}
+
+double _distanceMilesToRoute(RideCoordinate point, List<RideCoordinate> route) {
+  const milesPerLatitudeDegree = 69.0;
+  final longitudeScale =
+      milesPerLatitudeDegree * math.cos(point.latitude * math.pi / 180);
+  var closest = double.infinity;
+  for (var index = 0; index < route.length - 1; index++) {
+    final start = route[index];
+    final end = route[index + 1];
+    final startX = (start.longitude - point.longitude) * longitudeScale;
+    final startY = (start.latitude - point.latitude) * milesPerLatitudeDegree;
+    final endX = (end.longitude - point.longitude) * longitudeScale;
+    final endY = (end.latitude - point.latitude) * milesPerLatitudeDegree;
+    final deltaX = endX - startX;
+    final deltaY = endY - startY;
+    final lengthSquared = deltaX * deltaX + deltaY * deltaY;
+    final projection = lengthSquared == 0
+        ? 0.0
+        : (-(startX * deltaX + startY * deltaY) / lengthSquared).clamp(
+            0.0,
+            1.0,
+          );
+    final closestX = startX + projection * deltaX;
+    final closestY = startY + projection * deltaY;
+    closest = math.min(
+      closest,
+      math.sqrt(closestX * closestX + closestY * closestY),
+    );
+  }
+  return closest;
+}
+
+class RideCoordinate {
+  const RideCoordinate({required this.latitude, required this.longitude});
+
+  final double latitude;
+  final double longitude;
+
+  bool get isValid =>
+      latitude >= -90 &&
+      latitude <= 90 &&
+      longitude >= -180 &&
+      longitude <= 180;
+
+  factory RideCoordinate.fromJson(Map<String, dynamic> json) {
+    return RideCoordinate(
+      latitude: (json['latitude'] as num?)?.toDouble() ?? double.nan,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? double.nan,
     );
   }
 }
@@ -520,6 +601,13 @@ class RideSearchCriteria {
       sort: sort ?? this.sort,
     );
   }
+
+  /// Client-approved M7 alert window: the selected day plus three days on
+  /// either side, while the immediate search itself remains date-specific.
+  RideSearchCriteria forSimilarDateAlert() => copyWith(
+    startAt: startAt.subtract(const Duration(days: 3)),
+    endAt: endAt.add(const Duration(days: 3)),
+  );
 
   Map<String, Object?> toJson() => {
     'originQuery': originQuery.trim(),

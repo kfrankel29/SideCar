@@ -123,4 +123,70 @@ void main() {
 
     expect(criteria.toJson()['driverLanguage'], 'Uzbek');
   });
+
+  test('similar-date notifications cover three days on either side', () {
+    final selected = DateTime(2026, 9, 10);
+    final criteria = RideSearchCriteria(
+      originQuery: 'Isla Vista',
+      destinationQuery: 'Palo Alto',
+      pickupPlaceId: 'pickup',
+      dropoffPlaceId: 'dropoff',
+      startAt: selected,
+      endAt: selected.add(const Duration(days: 1)),
+    );
+
+    final alert = criteria.forSimilarDateAlert();
+
+    expect(alert.startAt, DateTime(2026, 9, 7));
+    expect(alert.endAt, DateTime(2026, 9, 14));
+    expect(criteria.startAt, selected);
+    expect(criteria.endAt, selected.add(const Duration(days: 1)));
+  });
+
+  test('stop picker removes gas stations beyond one mile of the route', () {
+    final context = RideStopPickerContext.fromJson({
+      'routePoints': [
+        {'latitude': 37.33, 'longitude': -121.90},
+        {'latitude': 37.43, 'longitude': -121.90},
+      ],
+      'gasStations': [
+        {
+          'placeId': 'near',
+          'displayName': 'Near route',
+          'mainText': 'Near route',
+          'secondaryText': 'San Jose, CA',
+          'latitude': 37.38,
+          'longitude': -121.905,
+        },
+        {
+          'placeId': 'far',
+          'displayName': 'Far from route',
+          'mainText': 'Far from route',
+          'secondaryText': 'San Jose, CA',
+          'latitude': 37.38,
+          'longitude': -121.93,
+        },
+      ],
+    });
+
+    expect(context.gasStations.map((station) => station.placeId), ['near']);
+  });
+
+  test(
+    'stop picker excludes borderline markers using the route safety margin',
+    () {
+      final context = RideStopPickerContext.fromJson({
+        'routePoints': [
+          {'latitude': 37.30, 'longitude': -121.90},
+          {'latitude': 37.50, 'longitude': -121.90},
+        ],
+        'gasStations': [
+          {'placeId': 'inside', 'latitude': 37.40, 'longitude': -121.895},
+          {'placeId': 'borderline', 'latitude': 37.40, 'longitude': -121.89},
+        ],
+      });
+
+      expect(context.gasStations.map((station) => station.placeId), ['inside']);
+    },
+  );
 }

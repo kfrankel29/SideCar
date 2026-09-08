@@ -4,6 +4,10 @@ export type NotificationCopy = {
   route: string;
 };
 
+export function isRideUpdateNotification(type: string): boolean {
+  return type.trim() !== "" && type !== "new_message";
+}
+
 export function notificationCopy(
   type: string,
   data: Record<string, string>,
@@ -17,6 +21,12 @@ export function notificationCopy(
     };
   case "seat_request":
     return {title: "New seat request", body: "A rider requested a seat on your trip.", route: "my_rides"};
+  case "ride_search_match":
+    return {
+      title: "A matching ride was posted",
+      body: `${data.originName || "Your pickup"} → ${data.destinationName || "destination"}`,
+      route: "search",
+    };
   case "seat_request_accepted":
     return {title: "Seat request accepted", body: "Pay within 24 hours to hold your seat.", route: "my_rides"};
   case "seat_request_declined":
@@ -28,11 +38,36 @@ export function notificationCopy(
   case "seat_booked":
     return {title: "Seat booked", body: "A rider completed payment for your trip.", route: "my_rides"};
   case "trip_reminder":
-    return {title: "Upcoming SideCar trip", body: "Your trip leaves in about 24 hours.", route: "my_rides"};
+    return {
+      title: "Upcoming SideCar trip",
+      body: data.reminderMinutes === "1440" ? "Your trip leaves in about 24 hours." :
+        data.reminderMinutes === "30" ? "Your trip leaves in about 30 minutes." :
+          data.reminderMinutes === "10" ? "Your trip leaves in about 10 minutes." :
+            "Your trip is coming up soon.",
+      route: "my_rides",
+    };
   case "pickup_code_reminder":
     return {title: "Pickup code ready", body: "Have your pickup code ready for the driver.", route: "my_rides"};
+  case "trip_started":
+    return {
+      title: "Your trip has started",
+      body: "Follow the live pickup and drop-off progress in SideCar.",
+      route: "live_trip",
+    };
   case "pickup_confirmed":
     return {title: "Pickup confirmed", body: "Your trip is now in progress.", route: "live_trip"};
+  case "rider_marked_no_show":
+    return {
+      title: "Marked as no-show",
+      body: "The driver marked you as a no-show after the 10-minute pickup wait.",
+      route: "my_rides",
+    };
+  case "no_show_trip_completed":
+    return {
+      title: "Trip completed",
+      body: "This ride was completed with your booking marked as a no-show.",
+      route: "my_rides",
+    };
   case "trip_completed":
     return {title: "Trip complete", body: "Rate your driver and trip when you have a moment.", route: "rating"};
   case "payout_released":

@@ -77,9 +77,12 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
           ? ref
                 .read(bookingRepositoryProvider)
                 .listRideRequests(rideId: widget.ride.id, forceRefresh: true)
-          : Future.value(<SeatBooking>[
-              if (widget.riderBooking != null) widget.riderBooking!,
-            ]);
+          : widget.riderBooking == null
+          ? Future.value(<SeatBooking>[])
+          : ref
+                .read(bookingRepositoryProvider)
+                .refreshBooking(widget.riderBooking!.id)
+                .then((booking) => <SeatBooking>[booking]);
       final results = await Future.wait<Object>([planFuture, bookingsFuture]);
       if (!mounted) return;
       setState(() {
@@ -100,6 +103,11 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
   @override
   Widget build(BuildContext context) {
     final plan = _plan;
+    final riderBooking = widget.isDriver
+        ? null
+        : _bookings.isNotEmpty
+        ? _bookings.first
+        : widget.riderBooking;
     return Scaffold(
       body: SafeArea(
         bottom: false,
@@ -150,7 +158,7 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
                 submitting: _submitting,
                 hasWaitingRiders: _waitingBookings.isNotEmpty,
                 phase: plan.phase,
-                riderBooking: widget.riderBooking,
+                riderBooking: riderBooking,
                 onPickupCode: _showPickupCodeSheet,
                 onCompleteTrip: _completeTrip,
                 onRateTrip: _openRating,
@@ -317,18 +325,22 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
   }
 
   void _openRatingWhenComplete(LiveTripPlan plan) {
+    final booking = _currentRiderBooking;
     if (widget.isDriver ||
         plan.phase != LiveTripPhase.complete ||
         _ratingOpened ||
-        widget.riderBooking == null) {
+        booking == null ||
+        booking.riderNoShow) {
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _openRating());
   }
 
   Future<void> _openRating() async {
-    final booking = widget.riderBooking;
-    if (!mounted || booking == null || _ratingOpened) return;
+    final booking = _currentRiderBooking;
+    if (!mounted || booking == null || booking.riderNoShow || _ratingOpened) {
+      return;
+    }
     _ratingOpened = true;
     final rated = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => TripRatingScreen(booking: booking)),
@@ -340,6 +352,12 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
       _ratingOpened = false;
     }
   }
+
+  SeatBooking? get _currentRiderBooking => widget.isDriver
+      ? null
+      : _bookings.isNotEmpty
+      ? _bookings.first
+      : widget.riderBooking;
 }
 
 class _Header extends StatelessWidget {
@@ -348,14 +366,15 @@ class _Header extends StatelessWidget {
   final Ride ride;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: ride.vehicle.makeAndModel.isEmpty ? 74 : 92,
-    child: Stack(
-      alignment: Alignment.topCenter,
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: BoxConstraints(
+      minHeight: ride.vehicle.makeAndModel.isEmpty ? 74 : 92,
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Positioned(
-          left: 0,
-          top: 2,
+        SizedBox(
+          width: 42,
           child: IconButton(
             tooltip: 'Back',
             padding: EdgeInsets.zero,
@@ -363,27 +382,30 @@ class _Header extends StatelessWidget {
             icon: const FinalDraftBackIcon(size: 23),
           ),
         ),
-        Column(
-          children: [
-            Text('Live trip', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 3),
-            Text(
-              '${ride.origin.displayName} → ${ride.destination.displayName}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            if (ride.vehicle.makeAndModel.isNotEmpty) ...[
+        Expanded(
+          child: Column(
+            children: [
+              Text('Live trip', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 3),
               Text(
-                ride.vehicle.makeAndModel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelMedium,
+                '${ride.origin.displayName} → ${ride.destination.displayName}',
+                textAlign: TextAlign.center,
+                softWrap: true,
+                style: Theme.of(context).textTheme.bodySmall,
               ),
+              if (ride.vehicle.makeAndModel.isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Text(
+                  ride.vehicle.makeAndModel,
+                  textAlign: TextAlign.center,
+                  softWrap: true,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
+        const SizedBox(width: 42),
       ],
     ),
   );
@@ -444,7 +466,7 @@ class _LiveBadge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
-      color: AppColors.ink,
+      color: AppColors.primary,
       borderRadius: BorderRadius.circular(99),
     ),
     child: const Text(
@@ -553,9 +575,11 @@ class _StopRow extends StatelessWidget {
             height: 28,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: stop.completedAt != null ? AppColors.ink : Colors.white,
+              color: stop.completedAt != null
+                  ? AppColors.primary
+                  : Colors.white,
               shape: BoxShape.circle,
-              border: Border.all(color: AppColors.ink),
+              border: Border.all(color: AppColors.primary),
             ),
             child: stop.completedAt != null
                 ? const Icon(Icons.check, color: Colors.white, size: 17)
@@ -596,7 +620,7 @@ class _StopRow extends StatelessWidget {
               ],
             ),
           ),
-          if (openNavigation) const Icon(Icons.chevron_right, size: 20),
+          if (openNavigation) const FinalDraftChevronIcon(size: 18),
         ],
       ),
     ),
@@ -653,7 +677,9 @@ class _BottomActions extends StatelessWidget {
               ),
             )
           : FilledButton(
-              onPressed: phase == LiveTripPhase.complete
+              onPressed:
+                  phase == LiveTripPhase.complete &&
+                      riderBooking?.riderNoShow != true
                   ? onRateTrip
                   : riderBooking?.status == BookingStatus.confirmed
                   ? () => Navigator.of(context).push<void>(
@@ -665,7 +691,9 @@ class _BottomActions extends StatelessWidget {
                   : null,
               child: Text(
                 phase == LiveTripPhase.complete
-                    ? 'Rate driver and trip'
+                    ? riderBooking?.riderNoShow == true
+                          ? 'Trip complete · no-show'
+                          : 'Rate driver and trip'
                     : riderBooking?.status == BookingStatus.confirmed
                     ? 'View my pickup code'
                     : 'Pickup confirmed',

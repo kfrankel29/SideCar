@@ -99,6 +99,7 @@ class BookingPaymentQuote {
     required this.serviceFeeCents,
     required this.processingFeeCents,
     required this.totalCents,
+    this.creditAppliedCents = 0,
   });
 
   factory BookingPaymentQuote.fromJson(Map<String, dynamic> json) =>
@@ -106,12 +107,14 @@ class BookingPaymentQuote {
         baseFareCents: (json['baseFareCents'] as num?)?.round() ?? 0,
         serviceFeeCents: (json['serviceFeeCents'] as num?)?.round() ?? 0,
         processingFeeCents: (json['processingFeeCents'] as num?)?.round() ?? 0,
+        creditAppliedCents: (json['creditAppliedCents'] as num?)?.round() ?? 0,
         totalCents: (json['totalCents'] as num?)?.round() ?? 0,
       );
 
   final int baseFareCents;
   final int serviceFeeCents;
   final int processingFeeCents;
+  final int creditAppliedCents;
   final int totalCents;
 
   String label(int cents) => '\$${(cents / 100).toStringAsFixed(2)}';
@@ -173,6 +176,8 @@ class SeatBooking {
     this.ratedAt,
     this.ratingSkippedAt,
     this.riderRatedAt,
+    this.riderRatingSkippedAt,
+    this.riderNoShow = false,
   });
 
   factory SeatBooking.fromJson(Map<String, dynamic> json) => SeatBooking(
@@ -213,6 +218,10 @@ class SeatBooking {
     riderRatedAt: DateTime.tryParse(
       json['riderRatedAt'] as String? ?? '',
     )?.toLocal(),
+    riderRatingSkippedAt: DateTime.tryParse(
+      json['riderRatingSkippedAt'] as String? ?? '',
+    )?.toLocal(),
+    riderNoShow: json['riderNoShow'] == true,
   );
 
   final String id;
@@ -244,8 +253,11 @@ class SeatBooking {
   final DateTime? ratedAt;
   final DateTime? ratingSkippedAt;
   final DateTime? riderRatedAt;
+  final DateTime? riderRatingSkippedAt;
+  final bool riderNoShow;
 
-  bool get driverHasRated => riderRatedAt != null;
+  bool get driverHasRated =>
+      riderRatedAt != null || riderRatingSkippedAt != null;
   bool get riderHasRated => ratedAt != null;
   bool get ratingPromptDismissed => ratingSkippedAt != null;
 

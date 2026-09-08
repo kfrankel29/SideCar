@@ -8,6 +8,9 @@
 .local/
 artifacts/
 docs/release/private/
+/tmp/
+.pnpm-store/
+.toolchains/
 
 # Environment files and credentials
 .env

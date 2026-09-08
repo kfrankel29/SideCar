@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sidecar/src/core/firebase/app_bootstrap.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
@@ -24,7 +26,30 @@ void main() {
   const phase = String.fromEnvironment('M3_E2E_PHASE');
   const email = String.fromEnvironment('M3_E2E_EMAIL');
   const password = String.fromEnvironment('M3_E2E_PASSWORD');
+  const qaRouteId = String.fromEnvironment('QA_ROUTE_ID');
+  const startDelaySeconds = int.fromEnvironment(
+    'M3_E2E_START_DELAY_SECONDS',
+  );
   const visualHoldSeconds = int.fromEnvironment('M3_E2E_VISUAL_HOLD_SECONDS');
+
+  Future<void> capture(String name) async {
+    final bytes = await binding.takeScreenshot(name);
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(
+        Uri.parse('http://127.0.0.1:8766/$name'),
+      );
+      request.contentLength = bytes.length;
+      request.add(bytes);
+      final response = await request.close();
+      await response.drain<void>();
+      debugPrint('M3_LIVE_CAPTURE_HTTP=$name:${response.statusCode}');
+    } on SocketException {
+      debugPrint('M3_LIVE_CAPTURE_HTTP=$name:unavailable');
+    } finally {
+      client.close(force: true);
+    }
+  }
 
   testWidgets('live Milestone 3 $phase flow', (tester) async {
     expect(phase, anyOf('driver', 'rider'));
@@ -39,6 +64,11 @@ void main() {
           'Firebase initialization failed: ${bootstrap.initializationError}',
     );
 
+    if (startDelaySeconds > 0) {
+      debugPrint('M3_E2E_WAITING_FOR_APP_CHECK=$startDelaySeconds');
+      await Future<void>.delayed(Duration(seconds: startDelaySeconds));
+    }
+
     await bootstrap.authRepository.signOut();
     final account = await bootstrap.authRepository.signIn(
       email: email,
@@ -52,7 +82,7 @@ void main() {
     expect(profile.primaryRole?.name, phase);
 
     final config = await bootstrap.businessConfigRepository.refresh();
-    expect(config.version, 'm3-rides');
+    expect(config.version, 'm6-admin-tools');
     expect(config.irsMileageRate, 0.76);
 
     final rides = bootstrap.rideRepository;
@@ -96,13 +126,16 @@ void main() {
           repeatWeekly: false,
         ),
       );
-      expect(ride.driverName, 'SideCar Driver');
+      expect(ride.driverName, profile.displayName);
       expect(ride.driverPhotoUrl, profile.photoUrl);
       expect(ride.driverPhotoUrl, isNotEmpty);
       expect(ride.status, 'published');
       expect(ride.pricePerSeatCents, 5000);
       expect(ride.maximumPriceCents, greaterThanOrEqualTo(5000));
-      expect(ride.shareUrl, startsWith('https://sidecar-fb0e7.web.app/ride'));
+      expect(
+        ride.shareUrl,
+        startsWith('https://sidecar-fb0e7.web.app/ride'),
+      );
       expect(
         ride.mapPreviewUrl,
         startsWith('https://sidecar-fb0e7.web.app/ride-map'),
@@ -140,9 +173,12 @@ void main() {
         rides,
         const RideHomeScreen(),
         profileRepository: bootstrap.profileRepository,
+        authRepository: bootstrap.authRepository,
+        bookingRepository: bootstrap.bookingRepository,
       );
       expect(find.text('Post your next ride'), findsOneWidget);
-      await binding.takeScreenshot('m3-live-driver-home');
+      debugPrint('M3_E2E_RIDE_ID=${ride.id}');
+      await capture('m3-live-driver-home');
       await _holdForVisualQa('driver-home', visualHoldSeconds);
 
       await _mountScreen(
@@ -150,9 +186,11 @@ void main() {
         rides,
         const PostRideScreen(),
         profileRepository: bootstrap.profileRepository,
+        authRepository: bootstrap.authRepository,
+        bookingRepository: bootstrap.bookingRepository,
       );
       expect(find.text('Post a ride'), findsOneWidget);
-      await binding.takeScreenshot('m3-live-driver-post');
+      await capture('m3-live-driver-post');
       await _holdForVisualQa('driver-post', visualHoldSeconds);
 
       await _mountScreen(
@@ -160,12 +198,14 @@ void main() {
         rides,
         const MyRidesScreen(),
         profileRepository: bootstrap.profileRepository,
+        authRepository: bootstrap.authRepository,
+        bookingRepository: bootstrap.bookingRepository,
       );
       expect(find.text('My rides'), findsOneWidget);
       expect(find.text('Requests'), findsOneWidget);
       expect(find.text('Recurring'), findsNothing);
       expect(find.text(ride.origin.displayName), findsWidgets);
-      await binding.takeScreenshot('m3-live-driver-my-rides');
+      await capture('m3-live-driver-my-rides');
       await _holdForVisualQa('driver-my-rides', visualHoldSeconds);
       return;
     }
@@ -180,9 +220,9 @@ void main() {
       luggageRequired: LuggageAllowance.backpack,
     );
     final matches = await rides.searchRides(criteria);
-    final ride = matches.firstWhere(
-      (item) => item.driverName == 'SideCar Driver',
-    );
+    final ride = qaRouteId.isEmpty
+        ? matches.first
+        : matches.firstWhere((item) => item.id == qaRouteId);
     expect(ride.driverPhotoUrl, isNotEmpty);
     expect((await rides.getRide(ride.id)).id, ride.id);
     expect(
@@ -207,12 +247,10 @@ void main() {
       )).map((item) => item.id),
       isNot(contains(ride.id)),
     );
-    expect(
-      (await rides.searchRides(
-        criteria.copyWith(minimumRating: 5),
-      )).map((item) => item.id),
-      isNot(contains(ride.id)),
-    );
+    final fiveStarIds = (await rides.searchRides(
+      criteria.copyWith(minimumRating: 5),
+    )).map((item) => item.id);
+    expect(fiveStarIds.contains(ride.id), ride.driverRating >= 5);
     expect(
       (await rides.searchRides(
         criteria.copyWith(
@@ -244,9 +282,11 @@ void main() {
       rides,
       const RideHomeScreen(),
       profileRepository: bootstrap.profileRepository,
+      authRepository: bootstrap.authRepository,
+      bookingRepository: bootstrap.bookingRepository,
     );
     expect(find.text('Where to?'), findsOneWidget);
-    await binding.takeScreenshot('m3-live-rider-home');
+    await capture('m3-live-rider-home');
     await _holdForVisualQa('rider-home', visualHoldSeconds);
 
     await _mountScreen(
@@ -254,9 +294,11 @@ void main() {
       rides,
       const SearchRidesScreen(),
       profileRepository: bootstrap.profileRepository,
+      authRepository: bootstrap.authRepository,
+      bookingRepository: bootstrap.bookingRepository,
     );
     expect(find.text('Find a ride'), findsOneWidget);
-    await binding.takeScreenshot('m3-live-rider-search');
+    await capture('m3-live-rider-search');
     await _holdForVisualQa('rider-search', visualHoldSeconds);
 
     await _mountScreen(
@@ -264,9 +306,11 @@ void main() {
       rides,
       SearchResultsScreen(criteria: criteria),
       profileRepository: bootstrap.profileRepository,
+      authRepository: bootstrap.authRepository,
+      bookingRepository: bootstrap.bookingRepository,
     );
-    expect(find.text('SideCar Driver'), findsWidgets);
-    await binding.takeScreenshot('m3-live-rider-results');
+    expect(find.text(ride.driverName), findsWidgets);
+    await capture('m3-live-rider-results');
     await _holdForVisualQa('rider-results', visualHoldSeconds);
 
     await _mountScreen(
@@ -274,13 +318,28 @@ void main() {
       rides,
       RideDetailsScreen(rideId: ride.id),
       profileRepository: bootstrap.profileRepository,
+      authRepository: bootstrap.authRepository,
+      bookingRepository: bootstrap.bookingRepository,
     );
-    expect(find.text('SideCar Driver'), findsOneWidget);
+    await _pumpUntilFound(tester, find.text('Request seat'));
+    expect(find.text(ride.driverName), findsOneWidget);
     expect(find.text('Request seat'), findsOneWidget);
     expect(find.byType(RideMapPreview), findsOneWidget);
-    await binding.takeScreenshot('m3-live-rider-details');
+    await capture('m3-live-rider-details');
     await _holdForVisualQa('rider-details', visualHoldSeconds);
   });
+}
+
+Future<void> _pumpUntilFound(
+  WidgetTester tester,
+  Finder finder, {
+  Duration timeout = const Duration(seconds: 20),
+}) async {
+  final end = DateTime.now().add(timeout);
+  while (finder.evaluate().isEmpty && DateTime.now().isBefore(end)) {
+    await tester.pump(const Duration(milliseconds: 200));
+  }
+  expect(finder, findsWidgets);
 }
 
 Future<void> _holdForVisualQa(String screen, int seconds) async {
@@ -386,14 +445,17 @@ Future<void> _mountScreen(
   WidgetTester tester,
   RideRepository repository,
   Widget screen, {
-  ProfileRepository? profileRepository,
+  required ProfileRepository profileRepository,
+  required AuthRepository authRepository,
+  required BookingRepository bookingRepository,
 }) async {
   runApp(
     ProviderScope(
       overrides: [
         rideRepositoryProvider.overrideWithValue(repository),
-        if (profileRepository != null)
-          profileRepositoryProvider.overrideWithValue(profileRepository),
+        profileRepositoryProvider.overrideWithValue(profileRepository),
+        authRepositoryProvider.overrideWithValue(authRepository),
+        bookingRepositoryProvider.overrideWithValue(bookingRepository),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

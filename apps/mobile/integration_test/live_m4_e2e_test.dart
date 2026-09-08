@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -136,10 +137,453 @@ void main() {
           riderPassword: riderPassword,
         );
         return;
+      case 'feedback-live-policies':
+        await _verifyFeedbackLivePolicies(
+          bootstrap,
+          driverEmail: driverEmail,
+          driverPassword: driverPassword,
+          riderEmail: riderEmail,
+          riderPassword: riderPassword,
+        );
+        return;
+      case 'feedback-full-trip':
+        await _verifyAutomatedTestPaymentTrip(
+          bootstrap,
+          driverEmail: driverEmail,
+          driverPassword: driverPassword,
+          riderEmail: riderEmail,
+          riderPassword: riderPassword,
+        );
+        return;
       default:
         fail('Set M4_E2E_PHASE to a supported live test phase.');
     }
   });
+}
+
+Future<void> _verifyAutomatedTestPaymentTrip(
+  AppBootstrapResult bootstrap, {
+  required String driverEmail,
+  required String driverPassword,
+  required String riderEmail,
+  required String riderPassword,
+}) async {
+  const noShowMode = bool.fromEnvironment('M4_E2E_NO_SHOW');
+  Ride? ride;
+  SeatBooking? booking;
+  var completed = false;
+  try {
+    await bootstrap.authRepository.signOut();
+    await _signIn(
+      bootstrap,
+      email: driverEmail,
+      password: driverPassword,
+    );
+    final payoutStatus = await bootstrap.bookingRepository
+        .getDriverPayoutStatus();
+    expect(payoutStatus.connected, isTrue);
+    expect(payoutStatus.payoutsEnabled, isTrue);
+    final origin = await _firstPlace(
+      bootstrap,
+      'University of California Santa Barbara',
+    );
+    final destination = await _firstPlace(
+      bootstrap,
+      'San Francisco International Airport',
+    );
+    final departureAt = noShowMode
+        ? DateTime.now().add(const Duration(seconds: 30))
+        : DateTime.now().add(const Duration(days: 160));
+    ride = await bootstrap.rideRepository.createRide(
+      RideDraft(
+        origin: origin,
+        destination: destination,
+        departureAt: departureAt,
+        seats: 1,
+        pricePerSeatCents: 2500,
+        luggageAllowance: LuggageAllowance.oneSuitcase,
+        genderRestriction: RideGenderRestriction.any,
+      ),
+    );
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    booking = await bootstrap.bookingRepository.requestSeat(
+      SeatRequest(
+        rideId: ride.id,
+        seat: BookingSeat.front,
+        pickupPlaceId: ride.origin.placeId,
+        dropoffPlaceId: ride.destination.placeId,
+      ),
+    );
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(
+      bootstrap,
+      email: driverEmail,
+      password: driverPassword,
+    );
+    final accepted = await bootstrap.bookingRepository.respondToRequest(
+      booking.id,
+      accept: true,
+    );
+    expect(accepted.status, BookingStatus.acceptedPaymentPending);
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    final payment = await FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('createBookingPayment')
+        .call<Map<String, dynamic>>({
+          'bookingId': booking.id,
+          'paymentMethod': 'card',
+        });
+    await _confirmStripeTestPayment(payment.data);
+    SeatBooking paid = await bootstrap.bookingRepository.refreshBooking(
+      booking.id,
+    );
+    for (var attempt = 0; attempt < 45; attempt++) {
+      if (paid.status == BookingStatus.confirmed) break;
+      await Future<void>.delayed(const Duration(seconds: 1));
+      paid = await bootstrap.bookingRepository.refreshBooking(booking.id);
+    }
+    expect(paid.status, BookingStatus.confirmed);
+    expect(paid.paymentStatus, 'paid');
+    expect(paid.pickupCode, matches(RegExp(r'^\d{4}$')));
+    expect(paid.serviceFeeCents, 125);
+    expect(paid.driverPayoutCents, 2375);
+    if (noShowMode) {
+      await bootstrap.notificationService.markRideUpdatesRead();
+    }
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(
+      bootstrap,
+      email: driverEmail,
+      password: driverPassword,
+    );
+    final pickupPlan = await bootstrap.rideRepository.startLiveTrip(ride.id);
+    expect(pickupPlan.phase, LiveTripPhase.pickups);
+    expect(pickupPlan.pickupStops.single.bookingId, booking.id);
+    if (noShowMode) {
+      final eligibleAt = ride.departureAt.add(const Duration(minutes: 10));
+      if (DateTime.now().isBefore(eligibleAt)) {
+        await expectLater(
+          bootstrap.bookingRepository.markRiderNoShow(booking.id),
+          throwsA(
+            isA<AppFailure>().having(
+              (failure) => failure.code,
+              'code',
+              'failed-precondition',
+            ),
+          ),
+        );
+      }
+      while (DateTime.now().isBefore(eligibleAt)) {
+        final remaining = eligibleAt.difference(DateTime.now());
+        debugPrint(
+          'M4_E2E_NO_SHOW_WAIT_SECONDS=${remaining.inSeconds.clamp(0, 600)}',
+        );
+        await Future<void>.delayed(
+          Duration(seconds: remaining.inSeconds.clamp(1, 30)),
+        );
+      }
+      await Future<void>.delayed(const Duration(seconds: 2));
+      await bootstrap.bookingRepository.markRiderNoShow(booking.id);
+      final marked = await bootstrap.bookingRepository.refreshBooking(
+        booking.id,
+      );
+      expect(marked.status, BookingStatus.inProgress);
+      expect(marked.riderNoShow, isTrue);
+
+      await bootstrap.authRepository.signOut();
+      await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+      var riderUnread = await bootstrap.notificationService
+          .unreadRideUpdateCount();
+      for (var attempt = 0; attempt < 20 && riderUnread == 0; attempt++) {
+        await Future<void>.delayed(const Duration(seconds: 1));
+        riderUnread = await bootstrap.notificationService
+            .unreadRideUpdateCount();
+      }
+      expect(
+        riderUnread,
+        greaterThan(0),
+        reason: 'The rider must receive the no-show update.',
+      );
+      await bootstrap.notificationService.markRideUpdatesRead();
+
+      await bootstrap.authRepository.signOut();
+      await _signIn(
+        bootstrap,
+        email: driverEmail,
+        password: driverPassword,
+      );
+      await bootstrap.bookingRepository.completeDriverTrip(ride.id);
+      final finished = await bootstrap.bookingRepository.refreshBooking(
+        booking.id,
+      );
+      expect(
+        finished.status,
+        anyOf(BookingStatus.completed, BookingStatus.payoutHeld),
+      );
+      expect(finished.riderNoShow, isTrue);
+      expect(finished.driverPayoutCents, 2375);
+      completed = true;
+      debugPrint(
+        'M4_E2E_RESULT=${jsonEncode({'stripeMode': 'test', 'payment': 'paid', 'earlyNoShow': 'rejected', 'waitMinutes': 10, 'noShow': 'marked', 'riderNotification': true, 'driverPayoutCents': 2375})}',
+      );
+      return;
+    }
+    final wrongCode = paid.pickupCode == '0000' ? '1111' : '0000';
+    await expectLater(
+      bootstrap.bookingRepository.verifyPickupCode(booking.id, wrongCode),
+      throwsA(isA<AppFailure>()),
+    );
+    await bootstrap.bookingRepository.verifyPickupCode(
+      booking.id,
+      paid.pickupCode!,
+    );
+    final inProgress = await bootstrap.bookingRepository.refreshBooking(
+      booking.id,
+    );
+    expect(inProgress.status, BookingStatus.inProgress);
+    final dropoffPlan = await bootstrap.rideRepository.getLiveTrip(ride.id);
+    expect(dropoffPlan.phase, LiveTripPhase.dropoffs);
+    await bootstrap.bookingRepository.completeDriverTrip(ride.id);
+
+    SeatBooking finished = await bootstrap.bookingRepository.refreshBooking(
+      booking.id,
+    );
+    for (var attempt = 0; attempt < 45; attempt++) {
+      if ({BookingStatus.completed, BookingStatus.payoutHeld}.contains(
+        finished.status,
+      )) {
+        break;
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+      finished = await bootstrap.bookingRepository.refreshBooking(booking.id);
+    }
+    expect(
+      finished.status,
+      anyOf(BookingStatus.completed, BookingStatus.payoutHeld),
+    );
+    expect(finished.driverPayoutCents, 2375);
+    await bootstrap.bookingRepository.rateRider(
+      bookingId: booking.id,
+      rating: 5,
+      comment: 'SideCar live driver acceptance verification.',
+    );
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    await bootstrap.bookingRepository.rateTrip(
+      bookingId: booking.id,
+      driverRating: 5,
+      tripRating: 5,
+      comment: 'SideCar live rider acceptance verification.',
+    );
+    completed = true;
+    debugPrint(
+      'M4_E2E_RESULT=${jsonEncode({'stripeMode': 'test', 'payment': 'paid', 'pickupCode': 'verified', 'liveTrip': 'completed', 'driverPayoutCents': 2375, 'riderRating': 'submitted', 'driverRating': 'submitted'})}',
+    );
+  } finally {
+    if (!completed && ride != null) {
+      await bootstrap.authRepository.signOut();
+      await _signIn(
+        bootstrap,
+        email: driverEmail,
+        password: driverPassword,
+      );
+      try {
+        await bootstrap.bookingRepository.cancelDriverRide(ride.id);
+      } on Object {
+        final currentRide = await bootstrap.rideRepository.getRide(ride.id);
+        if (currentRide.status != 'cancelled' &&
+            currentRide.status != 'completed') {
+          await bootstrap.rideRepository.cancelRide(ride.id);
+        }
+      }
+    }
+    await bootstrap.authRepository.signOut();
+  }
+}
+
+Future<void> _confirmStripeTestPayment(Map<String, dynamic> payment) async {
+  final clientSecret = payment['clientSecret'] as String? ?? '';
+  final publishableKey = payment['publishableKey'] as String? ?? '';
+  expect(clientSecret, startsWith('pi_'));
+  expect(
+    publishableKey,
+    startsWith('pk_test_'),
+    reason: 'Automated QA must never confirm a live Stripe payment.',
+  );
+  final intentId = clientSecret.split('_secret_').first;
+  final client = HttpClient();
+  try {
+    final request = await client.postUrl(
+      Uri.parse('https://api.stripe.com/v1/payment_intents/$intentId/confirm'),
+    );
+    request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $publishableKey');
+    request.headers.set(
+      HttpHeaders.contentTypeHeader,
+      'application/x-www-form-urlencoded',
+    );
+    request.write(
+      'client_secret=${Uri.encodeQueryComponent(clientSecret)}&'
+      'payment_method=pm_card_visa&'
+      'return_url=${Uri.encodeQueryComponent('sidecar://app/stripe-redirect')}',
+    );
+    final response = await request.close();
+    await response.drain<void>();
+    expect(
+      response.statusCode,
+      inInclusiveRange(200, 299),
+      reason: 'Stripe test PaymentIntent confirmation must succeed.',
+    );
+  } finally {
+    client.close(force: true);
+  }
+}
+
+Future<void> _verifyFeedbackLivePolicies(
+  AppBootstrapResult bootstrap, {
+  required String driverEmail,
+  required String driverPassword,
+  required String riderEmail,
+  required String riderPassword,
+}) async {
+  Ride? ride;
+  SeatBooking? booking;
+  try {
+    await bootstrap.authRepository.signOut();
+    await _signIn(
+      bootstrap,
+      email: driverEmail,
+      password: driverPassword,
+    );
+    await bootstrap.notificationService.markRideUpdatesRead();
+    final origin = await _firstPlace(
+      bootstrap,
+      'University of California Santa Barbara',
+    );
+    final destination = await _firstPlace(
+      bootstrap,
+      'San Francisco International Airport',
+    );
+    ride = await bootstrap.rideRepository.createRide(
+      RideDraft(
+        origin: origin,
+        destination: destination,
+        departureAt: DateTime.now().add(const Duration(days: 150)),
+        seats: 1,
+        pricePerSeatCents: 2500,
+        luggageAllowance: LuggageAllowance.oneSuitcase,
+        genderRestriction: RideGenderRestriction.any,
+      ),
+    );
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    await bootstrap.notificationService.markRideUpdatesRead();
+    booking = await bootstrap.bookingRepository.requestSeat(
+      SeatRequest(
+        rideId: ride.id,
+        seat: BookingSeat.front,
+        pickupPlaceId: ride.origin.placeId,
+        dropoffPlaceId: ride.destination.placeId,
+      ),
+    );
+    expect(booking.status, BookingStatus.pendingDriver);
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(
+      bootstrap,
+      email: driverEmail,
+      password: driverPassword,
+    );
+    expect(
+      await bootstrap.notificationService.unreadRideUpdateCount(),
+      greaterThan(0),
+      reason: 'The driver must receive attention for a new seat request.',
+    );
+    final accepted = await bootstrap.bookingRepository.respondToRequest(
+      booking.id,
+      accept: true,
+    );
+    expect(accepted.status, BookingStatus.acceptedPaymentPending);
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+    expect(
+      await bootstrap.notificationService.unreadRideUpdateCount(),
+      greaterThan(0),
+      reason: 'The rider must receive attention when a request is accepted.',
+    );
+    final quote = await bootstrap.bookingRepository.quoteBookingPayment(
+      booking.id,
+      BookingPaymentMethod.card,
+    );
+    expect(quote.baseFareCents, 2500);
+    expect(quote.serviceFeeCents, 125);
+    expect(quote.processingFeeCents, greaterThanOrEqualTo(0));
+    expect(quote.totalCents, greaterThanOrEqualTo(2625));
+    final rawQuote = await FirebaseFunctions.instanceFor(region: 'us-central1')
+        .httpsCallable('quoteBookingPayment')
+        .call<Map<String, dynamic>>({
+          'bookingId': booking.id,
+          'paymentMethod': 'card',
+        });
+    final amounts = Map<String, dynamic>.from(
+      rawQuote.data['amounts'] as Map,
+    );
+    expect(amounts['driverPlatformFeeCents'], 125);
+    expect(amounts['driverPayoutCents'], 2375);
+
+    await bootstrap.authRepository.signOut();
+    await _signIn(
+      bootstrap,
+      email: driverEmail,
+      password: driverPassword,
+    );
+    await expectLater(
+      bootstrap.bookingRepository.markRiderNoShow(booking.id),
+      throwsA(
+        isA<AppFailure>().having(
+          (failure) => failure.code,
+          'code',
+          'failed-precondition',
+        ),
+      ),
+    );
+    debugPrint(
+      'M4_E2E_RESULT=${jsonEncode({'requestNotification': true, 'acceptNotification': true, 'riderFeePercentage': 5, 'driverFeePercentage': 5, 'earlyNoShowRejected': true})}',
+    );
+  } finally {
+    if (booking != null) {
+      await bootstrap.authRepository.signOut();
+      await _signIn(bootstrap, email: riderEmail, password: riderPassword);
+      final current = await bootstrap.bookingRepository.refreshBooking(
+        booking.id,
+      );
+      if (current.status != BookingStatus.cancelled) {
+        await bootstrap.bookingRepository.cancelBooking(booking.id);
+      }
+      await bootstrap.notificationService.markRideUpdatesRead();
+    }
+    if (ride != null) {
+      await bootstrap.authRepository.signOut();
+      await _signIn(
+        bootstrap,
+        email: driverEmail,
+        password: driverPassword,
+      );
+      final currentRide = await bootstrap.rideRepository.getRide(ride.id);
+      if (currentRide.status != 'cancelled') {
+        await bootstrap.rideRepository.cancelRide(ride.id);
+      }
+      await bootstrap.notificationService.markRideUpdatesRead();
+    }
+    await bootstrap.authRepository.signOut();
+  }
 }
 
 Future<void> _verifyImmediateRidePost(
@@ -645,9 +1089,9 @@ Future<void> _preparePayment(
     BookingPaymentMethod.card,
   );
   expect(quote.baseFareCents, 2500);
-  expect(quote.serviceFeeCents, 200);
+  expect(quote.serviceFeeCents, 125);
   expect(quote.processingFeeCents, greaterThan(0));
-  expect(quote.totalCents, greaterThan(2700));
+  expect(quote.totalCents, greaterThan(2625));
 
   final result = await FirebaseFunctions.instanceFor(region: 'us-central1')
       .httpsCallable('createBookingPayment')
@@ -735,7 +1179,7 @@ Future<void> _completeTrip(
   final booking = await bootstrap.bookingRepository.refreshBooking(bookingId);
   expect(booking.status, BookingStatus.completed);
   expect(booking.payoutStatus, 'paid');
-  expect(booking.driverPayoutCents, 2500);
+  expect(booking.driverPayoutCents, 2375);
 }
 
 Future<void> _prepareRefund(

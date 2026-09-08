@@ -54,7 +54,7 @@ void main() {
       find.text('Drop-off · 95 University Ave, Palo Alto, CA 94301'),
       findsOneWidget,
     );
-    expect(find.text(r'Pay $55.92'), findsOneWidget);
+    expect(find.text(r'Pay $54.38'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -161,6 +161,19 @@ void main() {
     expect(find.text('20 yrs · Female · English'), findsOneWidget);
     expect(find.text('4.8'), findsOneWidget);
     expect(find.text('6'), findsOneWidget);
+    expect(find.text('Reviews'), findsOneWidget);
+    expect(find.text('Jordan Taylor'), findsOneWidget);
+    expect(find.text('5.0'), findsWidgets);
+    expect(find.text('Friendly and right on time.'), findsOneWidget);
+    expect(find.text('Fourth review is initially hidden.'), findsNothing);
+    expect(find.text('View all 4 reviews'), findsOneWidget);
+    await tester.tap(find.text('View all 4 reviews'));
+    await tester.pumpAndSettle();
+    expect(find.text('Fourth review is initially hidden.'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
     expect(find.text('Report user'), findsOneWidget);
     expect(find.text('Block user'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -186,6 +199,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
     expect(find.text('Unblock user'), findsOneWidget);
     expect(find.text('Block user'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -233,6 +248,8 @@ void main() {
     expect(find.text('Confirm rider pickup'), findsOneWidget);
     expect(find.text('Rider'), findsOneWidget);
     expect(find.text('Pickup code'), findsOneWidget);
+    expect(find.text('Mark rider as no-show'), findsNothing);
+    expect(find.text('Mark no-show'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -244,7 +261,9 @@ void main() {
         ProviderScope(
           overrides: [
             rideRepositoryProvider.overrideWithValue(_M4RideRepository()),
-            bookingRepositoryProvider.overrideWithValue(_M4Repository()),
+            bookingRepositoryProvider.overrideWithValue(
+              _M4Repository(bookings: [_booking()]),
+            ),
           ],
           child: MaterialApp(
             theme: AppTheme.light,
@@ -382,9 +401,9 @@ SeatBooking _booking({String status = 'confirmed'}) => SeatBooking.fromJson({
   'destinationName': 'Palo Alto',
   'departureAt': '2026-08-10T22:00:00.000Z',
   'baseFareCents': 5000,
-  'serviceFeeCents': 400,
-  'processingFeeCents': 192,
-  'totalCents': 5592,
+  'serviceFeeCents': 250,
+  'processingFeeCents': 188,
+  'totalCents': 5438,
   'pickupCode': '0909',
   'seatKey': 'rear_left',
   'pickupLocation': {
@@ -440,14 +459,18 @@ class _M4Repository extends UnavailableBookingRepository {
   }) async => bookings;
 
   @override
+  Future<SeatBooking> refreshBooking(String bookingId) async =>
+      bookings.singleWhere((booking) => booking.id == bookingId);
+
+  @override
   Future<BookingPaymentQuote> quoteBookingPayment(
     String bookingId,
     BookingPaymentMethod method,
   ) async => const BookingPaymentQuote(
     baseFareCents: 5000,
-    serviceFeeCents: 400,
-    processingFeeCents: 192,
-    totalCents: 5592,
+    serviceFeeCents: 250,
+    processingFeeCents: 188,
+    totalCents: 5438,
   );
 
   @override
@@ -484,6 +507,11 @@ class _M4RideRepository implements RideRepository {
   Future<RideStopPickerContext> getRideStopPickerContext(
     String rideId, {
     String selectedPlaceId = '',
+    List<String> searchPlaceIds = const [],
+    bool includeGasStations = false,
+    String gasStationQuery = '',
+    double? gasStationLatitude,
+    double? gasStationLongitude,
   }) async => _unused();
   @override
   Future<RidePlacePrediction> resolveRideStopPin(
@@ -599,5 +627,39 @@ class _M4PublicProfileRepository implements PublicProfileRepository {
     language: 'English',
     rating: 4.8,
     tripCount: 6,
+    reviews: [
+      PublicReview(
+        reviewId: 'review-1',
+        reviewerName: 'Jordan Taylor',
+        reviewerPhotoUrl: '',
+        rating: 5,
+        comment: 'Friendly and right on time.',
+        createdAt: DateTime(2026, 8, 20),
+      ),
+      PublicReview(
+        reviewId: 'review-2',
+        reviewerName: 'Sofia M.',
+        reviewerPhotoUrl: '',
+        rating: 5,
+        comment: 'Easy to coordinate with.',
+        createdAt: DateTime(2026, 8, 19),
+      ),
+      PublicReview(
+        reviewId: 'review-3',
+        reviewerName: 'Lena P.',
+        reviewerPhotoUrl: '',
+        rating: 4,
+        comment: 'A smooth trip.',
+        createdAt: DateTime(2026, 8, 18),
+      ),
+      PublicReview(
+        reviewId: 'review-4',
+        reviewerName: 'Alex R.',
+        reviewerPhotoUrl: '',
+        rating: 5,
+        comment: 'Fourth review is initially hidden.',
+        createdAt: DateTime(2026, 8, 17),
+      ),
+    ],
   );
 }

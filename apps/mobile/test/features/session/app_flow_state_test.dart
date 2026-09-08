@@ -19,7 +19,6 @@ void main() {
   );
   const verifiedDriver = VerificationSummary(
     identity: VerificationStatus.verified,
-    insurance: VerificationStatus.verified,
     vehicle: VehicleProfile(
       year: 2024,
       make: 'Honda',
@@ -56,7 +55,7 @@ void main() {
     expect(resolveAppFlowStage(rider, verifiedIdentity), AppFlowStage.main);
   });
 
-  test('drivers require identity, vehicle, and insurance verification', () {
+  test('drivers require identity and vehicle verification', () {
     final driver = completeProfile.copyWith(primaryRole: PrimaryRole.driver);
 
     expect(

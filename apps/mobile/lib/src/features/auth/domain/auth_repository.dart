@@ -7,13 +7,18 @@ abstract interface class AuthRepository {
 
   Future<AccountUser?> validateCurrentSession();
   Future<AccountUser> signIn({required String email, required String password});
-  Future<AccountUser> signInWithGoogle();
+  Future<AccountUser> signInWithGoogle({
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
+  });
 
   Future<AccountUser> createStudentAccount({
     required String firstName,
     required String lastName,
     required String email,
     required String password,
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
   });
 
   Future<void> resendEmailVerificationCode();

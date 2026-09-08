@@ -24,6 +24,9 @@ void main() {
     await tester.enterText(fields.at(1), 'Chen');
     await tester.enterText(fields.at(2), 'maya@ucsb.edu');
     await tester.enterText(fields.at(3), 'password1');
+    await tester.tap(find.byType(Checkbox).at(0));
+    await tester.tap(find.byType(Checkbox).at(1));
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Continue'));
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await _pumpNavigation(tester);
 
@@ -160,6 +163,8 @@ class _NavigationAuthRepository implements AuthRepository {
     required String lastName,
     required String email,
     required String password,
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
   }) async {
     return AccountUser(id: 'user-1', email: email, emailVerified: false);
   }
@@ -195,7 +200,10 @@ class _NavigationAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AccountUser> signInWithGoogle() {
+  Future<AccountUser> signInWithGoogle({
+    bool acceptedLegalTerms = false,
+    bool confirmedAge18 = false,
+  }) {
     throw UnimplementedError();
   }
 

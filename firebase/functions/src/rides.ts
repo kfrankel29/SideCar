@@ -1,3 +1,4 @@
+import {createHash} from "node:crypto";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
@@ -18,8 +19,12 @@ import {
 import {
   PolygonRing,
   decodeGooglePolyline,
+  gasStationMatchesRoute,
+  pointMatchesRouteAndSearchArea,
   proximityToRoute,
   routePointAllowed,
+  routeSearchMatch,
+  searchRadiusMilesForPlace,
 } from "./ride_routing.js";
 import {weeklyDepartures} from "./ride_recurrence.js";
 import {compareClosestDepartures} from "./ride_search.js";
@@ -52,6 +57,7 @@ const region = "us-central1";
 const maxSearchResults = 100;
 const remoteTemplateCache = new AsyncTtlCache<RemoteConfigTemplate>(60_000);
 const gasStationCaches = new Map<string, AsyncTtlCache<PlaceDetails[]>>();
+const gasStationSearchCaches = new Map<string, AsyncTtlCache<PlaceDetails[]>>();
 
 type Json = Record<string, unknown>;
 
@@ -63,6 +69,7 @@ interface PlaceDetails {
   longitude: number;
   searchText: string;
   administrativeAreaCode: string;
+  searchRadiusMiles: number;
 }
 
 interface RouteDetails {
@@ -145,6 +152,9 @@ async function requireVerifiedUser(
   const vehicle = snapshots[2]?.data();
   const emailVerified = userRecord.emailVerified ||
     userRecord.customClaims?.schoolEmailVerified === true;
+  if (profile?.accountStatus === "suspended" || profile?.accountStatus === "banned") {
+    throw new HttpsError("permission-denied", "This account is not active.");
+  }
   if (!emailVerified || profile?.profileComplete !== true ||
       verification?.identityStatus !== "verified") {
     throw new HttpsError(
@@ -152,11 +162,10 @@ async function requireVerifiedUser(
       "Complete your profile and identity verification first.",
     );
   }
-  if (driver && (verification?.insuranceStatus !== "verified" ||
-      vehicle?.complete !== true)) {
+  if (driver && vehicle?.complete !== true) {
     throw new HttpsError(
       "failed-precondition",
-      "Complete your driver, vehicle, and insurance verification first.",
+      "Complete your driver and vehicle verification first.",
     );
   }
   return {...profile, vehicle};
@@ -248,7 +257,7 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
       method: "GET",
       headers: {
         "X-Goog-Api-Key": googleMapsApiKey.value(),
-        "X-Goog-FieldMask": "id,displayName,formattedAddress,location,addressComponents",
+        "X-Goog-FieldMask": "id,displayName,formattedAddress,location,addressComponents,types",
       },
     },
   );
@@ -261,6 +270,8 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
     throw new HttpsError("invalid-argument", "Choose a valid place from the list.");
   }
   const searchText = normalizeSearchText(`${displayName} ${response.formattedAddress}`);
+  const placeTypes = Array.isArray(response.types) ?
+    response.types.filter((value): value is string => typeof value === "string") : [];
   return {
     placeId: id,
     displayName,
@@ -269,6 +280,7 @@ async function placeDetails(placeId: string): Promise<PlaceDetails> {
     longitude: location.longitude,
     searchText,
     administrativeAreaCode: isCaliforniaAddress(response.addressComponents) ? "CA" : "",
+    searchRadiusMiles: searchRadiusMilesForPlace(placeTypes),
   };
 }
 
@@ -307,6 +319,7 @@ async function reverseGeocode(latitude: number, longitude: number): Promise<Plac
     longitude: location.lng,
     searchText: normalizeSearchText(formattedAddress),
     administrativeAreaCode: isCaliforniaAddress(addressComponents) ? "CA" : "",
+    searchRadiusMiles: 1,
   };
   requireCaliforniaPlace(place, "Pickup or drop-off");
   return place;
@@ -362,11 +375,11 @@ async function gasStationsAlongRoute(
             typeof place.formattedAddress !== "string" ||
             typeof location.latitude !== "number" ||
             typeof location.longitude !== "number") continue;
-        const proximity = proximityToRoute({
+        const point = {
           latitude: location.latitude,
           longitude: location.longitude,
-        }, route);
-        if (proximity.distanceMiles > 1) continue;
+        };
+        if (!gasStationMatchesRoute(point, route)) continue;
         unique.set(id, {
           placeId: id,
           displayName,
@@ -375,6 +388,108 @@ async function gasStationsAlongRoute(
           longitude: location.longitude,
           searchText: normalizeSearchText(`${displayName} ${place.formattedAddress}`),
           administrativeAreaCode: isCaliforniaAddress(place.addressComponents) ? "CA" : "",
+          searchRadiusMiles: 1,
+        });
+      }
+    }
+    return [...unique.values()]
+      .sort((first, second) =>
+        proximityToRoute(first, route).progress - proximityToRoute(second, route).progress,
+      )
+      .slice(0, 20);
+  });
+}
+
+async function gasStationsForSearchQuery(
+  rideId: string,
+  query: string,
+  encodedPolyline: string,
+  searchAnchors: ReadonlyArray<PlaceDetails>,
+): Promise<PlaceDetails[]> {
+  const anchorKey = searchAnchors
+    .slice(0, 3)
+    .map((anchor) => `${anchor.latitude.toFixed(4)},${anchor.longitude.toFixed(4)}`)
+    .join("|");
+  const cacheKey = `${rideId}:${normalizeSearchText(query)}:${anchorKey}`;
+  if (gasStationSearchCaches.size >= 100 && !gasStationSearchCaches.has(cacheKey)) {
+    gasStationSearchCaches.clear();
+  }
+  const cache = gasStationSearchCaches.get(cacheKey) ??
+    new AsyncTtlCache<PlaceDetails[]>(10 * 60_000);
+  gasStationSearchCaches.set(cacheKey, cache);
+  return cache.get(async () => {
+    const route = decodeGooglePolyline(encodedPolyline);
+    if (route.length < 2) return [];
+    const anchors = searchAnchors
+      .filter((anchor) => Number.isFinite(anchor.latitude) && Number.isFinite(anchor.longitude))
+      .slice(0, 3);
+    const responses = anchors.length > 0 ? await Promise.allSettled(anchors.map((anchor) =>
+      jsonResponse("https://places.googleapis.com/v1/places:searchNearby", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": googleMapsApiKey.value(),
+          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents",
+        },
+        body: JSON.stringify({
+          includedTypes: ["gas_station"],
+          maxResultCount: 20,
+          rankPreference: "DISTANCE",
+          locationRestriction: {
+            circle: {
+              center: {latitude: anchor.latitude, longitude: anchor.longitude},
+              radius: 25000,
+            },
+          },
+          languageCode: "en-US",
+        }),
+      }))) : await Promise.allSettled([
+      jsonResponse("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": googleMapsApiKey.value(),
+          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents",
+        },
+        body: JSON.stringify({
+          textQuery: `gas stations in ${query}, California`,
+          includedType: "gas_station",
+          strictTypeFiltering: true,
+          maxResultCount: 20,
+          languageCode: "en-US",
+          regionCode: "US",
+        }),
+      }),
+    ]);
+    const unique = new Map<string, PlaceDetails>();
+    for (const result of responses) {
+      if (result.status !== "fulfilled") continue;
+      const places = Array.isArray(result.value.places) ? result.value.places : [];
+      for (const rawPlace of places) {
+        const place = object(rawPlace);
+        const id = typeof place.id === "string" ? place.id : "";
+        const displayName = object(place.displayName).text;
+        const location = object(place.location);
+        if (!id || typeof displayName !== "string" ||
+            typeof place.formattedAddress !== "string" ||
+            typeof location.latitude !== "number" ||
+            typeof location.longitude !== "number" ||
+            !isCaliforniaAddress(place.addressComponents)) continue;
+        const point = {latitude: location.latitude, longitude: location.longitude};
+        if (!pointMatchesRouteAndSearchArea({
+          point,
+          route,
+          searchAnchors: anchors,
+        })) continue;
+        unique.set(id, {
+          placeId: id,
+          displayName,
+          formattedAddress: place.formattedAddress,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          searchText: normalizeSearchText(`${displayName} ${place.formattedAddress}`),
+          administrativeAreaCode: "CA",
+          searchRadiusMiles: 1,
         });
       }
     }
@@ -526,6 +641,139 @@ function initials(profile: Json): string {
     .slice(0, 2);
 }
 
+async function notifyMatchingRideAlerts(
+  rideId: string,
+  ride: Json,
+): Promise<void> {
+  if (typeof ride.encodedPolyline !== "string") return;
+  let route;
+  try {
+    route = decodeGooglePolyline(ride.encodedPolyline);
+  } catch {
+    return;
+  }
+  const [alerts, maximumDetourMiles, boundaryExceptions] = await Promise.all([
+    db.collection("ride_search_alerts").where("active", "==", true).limit(500).get(),
+    remoteNumber("max_route_detour_miles"),
+    boundaryExceptionRings(),
+  ]);
+  for (const alertDocument of alerts.docs) {
+    const alert = alertDocument.data();
+    const departure = ride.departureAt as Timestamp | undefined;
+    const startAt = alert.startAt as Timestamp | undefined;
+    const endAt = alert.endAt as Timestamp | undefined;
+    if (!departure || !startAt || !endAt ||
+        departure.toMillis() < startAt.toMillis() ||
+        departure.toMillis() >= endAt.toMillis() ||
+        alert.userId === ride.driverId ||
+        Number(ride.seatsAvailable ?? 0) < 1) continue;
+    const pickup = alert.pickup as PlaceDetails | undefined;
+    const dropoff = alert.dropoff as PlaceDetails | undefined;
+    if (!pickup || !dropoff || !routeSearchMatch({
+      route,
+      pickup,
+      dropoff,
+      pickupRadiusMiles: Math.max(maximumDetourMiles, pickup.searchRadiusMiles),
+      dropoffRadiusMiles: Math.max(maximumDetourMiles, dropoff.searchRadiusMiles),
+      boundaryExceptions,
+    })) continue;
+    const driverGender = String(alert.driverGender ?? "any");
+    const rideGender = String(ride.driverGender ?? "");
+    if (driverGender === "women" && !["female", "woman"].includes(rideGender)) continue;
+    if (driverGender === "men" && !["male", "man"].includes(rideGender)) continue;
+    if (!matchesDriverLanguage(ride.driverLanguage, alert.driverLanguage)) continue;
+    if (luggageRank(String(ride.luggageAllowance ?? "")) <
+        luggageRank(String(alert.luggageRequired ?? "backpack"))) continue;
+    if (Number(ride.driverRating ?? 0) < Number(alert.minimumRating ?? 0)) continue;
+    const notificationId = createHash("sha256")
+      .update(`ride-search:${alertDocument.id}:${rideId}`).digest("hex");
+    await db.collection("notifications").doc(notificationId).set({
+      userId: alert.userId,
+      type: "ride_search_match",
+      read: false,
+      data: {
+        rideId,
+        alertId: alertDocument.id,
+        originName: String(object(ride.origin).displayName ?? "Pickup"),
+        destinationName: String(object(ride.destination).displayName ?? "destination"),
+      },
+      createdAt: FieldValue.serverTimestamp(),
+    }, {merge: false});
+    await alertDocument.ref.set({
+      lastMatchedRideId: rideId,
+      lastMatchedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+  }
+}
+
+export const createRideSearchAlert = onCall(
+  {
+    region,
+    enforceAppCheck: true,
+    secrets: [googleMapsApiKey],
+    maxInstances: 30,
+    timeoutSeconds: 30,
+  },
+  async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
+    await requireVerifiedUser(request.auth.uid);
+    const data = object(request.data);
+    const startAt = timestamp(data.startAt, "Search date");
+    const endAt = timestamp(data.endAt, "Search date");
+    if (endAt.toMillis() <= startAt.toMillis() || endAt.toMillis() <= Date.now()) {
+      throw new HttpsError("invalid-argument", "Choose a future search date.");
+    }
+    const pickupPlaceId = stringValue(data.pickupPlaceId, "Pickup area", 300);
+    const dropoffPlaceId = stringValue(data.dropoffPlaceId, "Drop-off area", 300);
+    const [pickup, dropoff] = await Promise.all([
+      placeDetails(pickupPlaceId),
+      placeDetails(dropoffPlaceId),
+    ]);
+    requireCaliforniaPlace(pickup, "Pickup area");
+    requireCaliforniaPlace(dropoff, "Drop-off area");
+    const driverGender = choice(
+      data.driverGender ?? "any",
+      "Driver gender",
+      ["any", "women", "men"] as const,
+    );
+    const luggageRequired = choice(
+      data.luggageRequired ?? "backpack",
+      "Luggage",
+      ["backpack", "one_suitcase", "two_plus_bags"] as const,
+    );
+    const driverLanguage = typeof data.driverLanguage === "string" ?
+      data.driverLanguage.trim().slice(0, 80) : "";
+    const minimumRating = typeof data.minimumRating === "number" ?
+      Math.max(0, Math.min(5, data.minimumRating)) : 0;
+    const identity = createHash("sha256").update(JSON.stringify({
+      userId: request.auth.uid,
+      pickupPlaceId,
+      dropoffPlaceId,
+      startAt: startAt.toMillis(),
+      endAt: endAt.toMillis(),
+      driverGender,
+      driverLanguage,
+      luggageRequired,
+      minimumRating,
+    })).digest("hex");
+    await db.collection("ride_search_alerts").doc(identity).set({
+      userId: request.auth.uid,
+      pickup,
+      dropoff,
+      startAt,
+      endAt,
+      driverGender,
+      driverLanguage,
+      luggageRequired,
+      minimumRating,
+      active: true,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    return {alertId: identity, active: true};
+  },
+);
+
 export const searchPlaces = onCall(
   {region, enforceAppCheck: true, secrets: [googleMapsApiKey], maxInstances: 30},
   async (request) => {
@@ -585,6 +833,27 @@ export const getRideStopPickerContext = onCall(
     const rideId = stringValue(data.rideId, "Ride", 128);
     const selectedPlaceId = typeof data.selectedPlaceId === "string" ?
       data.selectedPlaceId.trim() : "";
+    const rawSearchPlaceIds = Array.isArray(data.searchPlaceIds) ? data.searchPlaceIds : [];
+    if (rawSearchPlaceIds.length > 6 ||
+        rawSearchPlaceIds.some((value) => typeof value !== "string" ||
+          !value.trim() || value.trim().length > 300)) {
+      throw new HttpsError("invalid-argument", "Search results are invalid.");
+    }
+    const searchPlaceIds = [...new Set(
+      rawSearchPlaceIds.map((value) => String(value).trim()),
+    )];
+    const includeGasStations = data.includeGasStations === true;
+    const gasStationQuery = typeof data.gasStationQuery === "string" ?
+      data.gasStationQuery.trim() : "";
+    if (gasStationQuery.length > 120) {
+      throw new HttpsError("invalid-argument", "Gas station search is invalid.");
+    }
+    const hasGasStationCenter = data.gasStationLatitude !== undefined ||
+      data.gasStationLongitude !== undefined;
+    const gasStationCenter = hasGasStationCenter ? {
+      latitude: coordinate(data.gasStationLatitude, "Map latitude", -90, 90),
+      longitude: coordinate(data.gasStationLongitude, "Map longitude", -180, 180),
+    } : undefined;
     const snapshot = await db.collection("rides").doc(rideId).get();
     const ride = snapshot.data();
     if (!ride || !["published", "in_progress"].includes(String(ride.status))) {
@@ -595,11 +864,36 @@ export const getRideStopPickerContext = onCall(
     if (!encodedPolyline) {
       throw new HttpsError("failed-precondition", "This ride route is unavailable.");
     }
-    const [stations, selectedStop] = await Promise.all([
-      gasStationsAlongRoute(rideId, encodedPolyline),
+    const [selectedStop, searchStops] = await Promise.all([
       selectedPlaceId ? placeDetails(selectedPlaceId) : Promise.resolve(undefined),
+      Promise.all(searchPlaceIds.map(placeDetails)),
     ]);
     if (selectedStop) requireCaliforniaPlace(selectedStop, "Pickup or drop-off");
+    for (const searchStop of searchStops) {
+      requireCaliforniaPlace(searchStop, "Search result");
+    }
+    const gasStationAnchors: PlaceDetails[] = [
+      ...(gasStationCenter ? [{
+        placeId: "map-center",
+        displayName: "Map center",
+        formattedAddress: "Map center",
+        latitude: gasStationCenter.latitude,
+        longitude: gasStationCenter.longitude,
+        searchText: "map center",
+        administrativeAreaCode: "CA",
+        searchRadiusMiles: 1,
+      }] : []),
+      ...searchStops,
+    ];
+    const stations = includeGasStations ?
+      (gasStationQuery.length >= 2 || gasStationCenter ?
+        await gasStationsForSearchQuery(
+          rideId,
+          gasStationQuery || "visible map",
+          encodedPolyline,
+          gasStationAnchors,
+        ) :
+        await gasStationsAlongRoute(rideId, encodedPolyline)) : [];
     const originData = object(ride.origin);
     const destinationData = object(ride.destination);
     const origin = {
@@ -611,6 +905,12 @@ export const getRideStopPickerContext = onCall(
       longitude: coordinate(destinationData.longitude, "Ride destination", -180, 180),
     };
     const viewport = rideMapViewport({encodedPolyline, origin, destination});
+    let routePoints: Array<{latitude: number; longitude: number}> = [];
+    try {
+      routePoints = decodeGooglePolyline(encodedPolyline);
+    } catch {
+      throw new HttpsError("failed-precondition", "This ride route is unavailable.");
+    }
     return {
       mapPreviewUrl: rideStopMapPreviewUrl({
         rideId,
@@ -626,6 +926,15 @@ export const getRideStopPickerContext = onCall(
         latitude: station.latitude,
         longitude: station.longitude,
       })),
+      searchResults: searchStops.map((place) => ({
+        placeId: place.placeId,
+        displayName: place.formattedAddress,
+        mainText: place.displayName,
+        secondaryText: place.formattedAddress,
+        latitude: place.latitude,
+        longitude: place.longitude,
+      })),
+      routePoints,
       mapCenter: viewport.center,
       mapZoom: viewport.zoom,
       mapWidth: routeMapWidth,
@@ -678,7 +987,7 @@ export const resolveRideStopPin = onCall(
     if (!match.allowed) {
       throw new HttpsError(
         "failed-precondition",
-        "Choose a point within 1 mile of the driver’s route or inside the approved boundary.",
+        "Choose a point within 1 mile of the driver’s route or student housing (Isla Vista / UCSB housing).",
       );
     }
     return {
@@ -859,6 +1168,14 @@ export const createRide = onCall(
       recurrenceIndex: 0,
       shareUrl: `${shareBase}${shareBase.includes("?") ? "&" : "?"}id=${reference.id}`,
     };
+    try {
+      await notifyMatchingRideAlerts(reference.id, firstRide);
+    } catch (error) {
+      logger.error("Ride was posted but matching saved-search alerts failed.", {
+        rideId: reference.id,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
     return {
       ride: publicRide(
         reference.id,
@@ -983,20 +1300,20 @@ export const searchRides = onCall(
         } catch {
           return false;
         }
-        const pickupMatch = routePointAllowed({
-          point: pickup,
+        if (!routeSearchMatch({
           route,
-          maximumDetourMiles,
+          pickup,
+          dropoff,
+          pickupRadiusMiles: Math.max(
+            maximumDetourMiles,
+            pickup.searchRadiusMiles,
+          ),
+          dropoffRadiusMiles: Math.max(
+            maximumDetourMiles,
+            dropoff.searchRadiusMiles,
+          ),
           boundaryExceptions,
-        });
-        const dropoffMatch = routePointAllowed({
-          point: dropoff,
-          route,
-          maximumDetourMiles,
-          boundaryExceptions,
-        });
-        if (!pickupMatch.allowed || !dropoffMatch.allowed ||
-            pickupMatch.progress > dropoffMatch.progress) return false;
+        })) return false;
         if (driverGender !== "any") {
           const normalizedGender = String(ride.driverGender ?? "");
           if (driverGender === "women" && normalizedGender !== "female" && normalizedGender !== "woman") return false;

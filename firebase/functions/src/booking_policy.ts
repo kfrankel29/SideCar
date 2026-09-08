@@ -3,6 +3,7 @@ export type ServiceFeeType = "percentage" | "fixed";
 export interface CheckoutPolicy {
   serviceFeeType: ServiceFeeType;
   serviceFeeValue: number;
+  driverFeePercentage: number;
   cardRate: number;
   cardFixedCents: number;
   bankRate: number;
@@ -11,7 +12,9 @@ export interface CheckoutPolicy {
 export interface CheckoutAmounts {
   baseFareCents: number;
   serviceFeeCents: number;
+  driverPlatformFeeCents: number;
   processingFeeCents: number;
+  creditAppliedCents: number;
   totalCents: number;
   driverPayoutCents: number;
 }
@@ -55,6 +58,36 @@ export function recordFailedPickupCodeAttempt(
   };
 }
 
+export function canMarkRiderNoShow(
+  agreedPickupAtMillis: number,
+  nowMillis: number,
+  waitMinutes = 10,
+): boolean {
+  if (![agreedPickupAtMillis, nowMillis, waitMinutes].every(Number.isFinite) ||
+      waitMinutes < 0) {
+    throw new Error("invalid-no-show-time");
+  }
+  return nowMillis >= agreedPickupAtMillis + waitMinutes * 60_000;
+}
+
+export function countsTowardCompletedRideReimbursement(
+  bookingStatus: unknown,
+): boolean {
+  return bookingStatus === "completed";
+}
+
+export function completedRideReimbursementCents(
+  bookingStatus: unknown,
+  driverPayoutCents: unknown,
+  baseFareCents: unknown,
+): number {
+  if (!countsTowardCompletedRideReimbursement(bookingStatus)) return 0;
+  const reimbursement = typeof driverPayoutCents === "number" ?
+    driverPayoutCents : baseFareCents;
+  return typeof reimbursement === "number" &&
+    Number.isInteger(reimbursement) && reimbursement > 0 ? reimbursement : 0;
+}
+
 export function canRequestGenderRestrictedRide(
   restriction: unknown,
   riderGender: unknown,
@@ -81,31 +114,51 @@ export function calculateCheckoutAmounts(
   baseFareCents: number,
   policy: CheckoutPolicy,
   paymentMethod: "card" | "bank" = "card",
+  availableCreditCents = 0,
 ): CheckoutAmounts {
   positiveInteger(baseFareCents, "base-fare");
   if (baseFareCents === 0) throw new Error("invalid-base-fare");
   percentage(policy.serviceFeeValue, "service-fee");
+  percentage(policy.driverFeePercentage, "driver-fee");
   percentage(policy.cardRate * 100, "card-rate");
   percentage(policy.bankRate * 100, "bank-rate");
   positiveInteger(policy.cardFixedCents, "card-fixed-fee");
+  positiveInteger(availableCreditCents, "available-credit");
 
   const serviceFeeCents = policy.serviceFeeType === "percentage" ?
     Math.round(baseFareCents * policy.serviceFeeValue / 100) :
     Math.round(policy.serviceFeeValue * 100);
+  const driverPlatformFeeCents = Math.round(
+    baseFareCents * policy.driverFeePercentage / 100,
+  );
   const providerRate = paymentMethod === "card" ? policy.cardRate : policy.bankRate;
-  const providerFixedCents = paymentMethod === "card" ? policy.cardFixedCents : 0;
+  // A zero configured Stripe rate means the client wants processing fees fully
+  // absorbed by the platform. Do not leak Stripe's fixed 30-cent component
+  // into the rider total in that mode.
+  const providerFixedCents = paymentMethod === "card" && providerRate > 0 ?
+    policy.cardFixedCents : 0;
   if (providerRate >= 1) throw new Error("invalid-processing-rate");
 
   // Stripe calculates its percentage on the final charge, so gross up once.
-  const totalCents = Math.ceil(
+  const totalBeforeCreditCents = Math.ceil(
     (baseFareCents + serviceFeeCents + providerFixedCents) / (1 - providerRate),
   );
+  // Stripe requires a minimum charge. Keep any remainder on the account rather
+  // than silently losing it when the available credit exceeds this checkout.
+  const creditAppliedCents = Math.min(
+    availableCreditCents,
+    Math.max(0, totalBeforeCreditCents - 50),
+  );
+  const totalCents = totalBeforeCreditCents - creditAppliedCents;
   return {
     baseFareCents,
     serviceFeeCents,
-    processingFeeCents: totalCents - baseFareCents - serviceFeeCents,
+    driverPlatformFeeCents,
+    processingFeeCents:
+      totalBeforeCreditCents - baseFareCents - serviceFeeCents,
+    creditAppliedCents,
     totalCents,
-    driverPayoutCents: baseFareCents,
+    driverPayoutCents: baseFareCents - driverPlatformFeeCents,
   };
 }
 

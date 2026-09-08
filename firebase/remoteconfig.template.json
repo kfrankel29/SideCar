@@ -2,7 +2,7 @@
   "conditions": [],
   "parameters": {
     "config_version": {
-      "defaultValue": {"value": "m5-messaging-notifications"},
+      "defaultValue": {"value": "m6-admin-tools"},
       "description": "Visible version marker used for acceptance testing.",
       "valueType": "STRING"
     },
@@ -29,8 +29,13 @@
       "valueType": "STRING"
     },
     "service_fee_value": {
-      "defaultValue": {"value": "8"},
+      "defaultValue": {"value": "5"},
       "description": "Service fee percentage or dollar amount, depending on type.",
+      "valueType": "NUMBER"
+    },
+    "driver_fee_percentage": {
+      "defaultValue": {"value": "5"},
+      "description": "Percentage deducted from each driver's reimbursement.",
       "valueType": "NUMBER"
     },
     "irs_mileage_rate": {

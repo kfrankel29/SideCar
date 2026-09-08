@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
+import 'dart:ui' as ui;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sidecar/src/features/navigation/presentation/final_draft_icons.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
@@ -95,9 +98,16 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       if (image == null) return;
       final bytes = await image.readAsBytes();
       if (!mounted) return;
+      final croppedBytes = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (context) => _ProfilePhotoCropScreen(bytes: bytes),
+        ),
+      );
+      if (croppedBytes == null || !mounted) return;
       setState(() {
-        _photoBytes = bytes;
-        _photoContentType = image.mimeType ?? 'image/jpeg';
+        _photoBytes = croppedBytes;
+        _photoContentType = 'image/png';
         _error = null;
       });
     } on PlatformException {
@@ -242,7 +252,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                         bottom: 1,
                         child: CircleAvatar(
                           radius: 12,
-                          backgroundColor: AppColors.ink,
+                          backgroundColor: AppColors.primary,
                           child: Icon(
                             Icons.add_rounded,
                             color: Colors.white,
@@ -341,6 +351,94 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   }
 }
 
+class _ProfilePhotoCropScreen extends StatefulWidget {
+  const _ProfilePhotoCropScreen({required this.bytes});
+
+  final Uint8List bytes;
+
+  @override
+  State<_ProfilePhotoCropScreen> createState() =>
+      _ProfilePhotoCropScreenState();
+}
+
+class _ProfilePhotoCropScreenState extends State<_ProfilePhotoCropScreen> {
+  final _cropKey = GlobalKey();
+  bool _saving = false;
+
+  Future<void> _usePhoto() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final boundary =
+          _cropKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return;
+      final image = await boundary.toImage(pixelRatio: 3);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (!mounted || data == null) return;
+      Navigator.pop(context, data.buffer.asUint8List());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Cancel photo crop',
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.close_rounded),
+        ),
+        title: const Text('Crop profile photo'),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Pinch to zoom and drag to frame your face.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const Spacer(),
+              Center(
+                child: ClipOval(
+                  child: RepaintBoundary(
+                    key: _cropKey,
+                    child: SizedBox.square(
+                      dimension: 300,
+                      child: InteractiveViewer(
+                        minScale: 1,
+                        maxScale: 4,
+                        panEnabled: true,
+                        scaleEnabled: true,
+                        child: Image.memory(
+                          widget.bytes,
+                          width: 300,
+                          height: 300,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              FilledButton(
+                onPressed: _saving ? null : _usePhoto,
+                child: Text(_saving ? 'Cropping…' : 'Use photo'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _PhotoSourceSheet extends StatelessWidget {
   const _PhotoSourceSheet();
 
@@ -424,7 +522,7 @@ class _PhotoSourceTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded),
+              const FinalDraftChevronIcon(size: 18),
             ],
           ),
         ),
@@ -631,8 +729,7 @@ class ProfileGateScreen extends ConsumerWidget {
                 profile != null &&
                 profile.displayName.isNotEmpty &&
                 profile.age >= 18 &&
-                profile.gender.isNotEmpty &&
-                profile.language.isNotEmpty,
+                profile.gender.isNotEmpty,
           ),
           const SizedBox(height: 10),
           _GateStep(

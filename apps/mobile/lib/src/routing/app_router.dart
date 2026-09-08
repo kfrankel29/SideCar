@@ -10,6 +10,7 @@ import 'package:sidecar/src/features/diagnostics/presentation/config_diagnostics
 import 'package:sidecar/src/features/navigation/presentation/main_tab_shell.dart';
 import 'package:sidecar/src/features/messaging/presentation/messaging_screens.dart';
 import 'package:sidecar/src/features/profile/presentation/profile_screens.dart';
+import 'package:sidecar/src/features/profile/presentation/account_support_screens.dart';
 import 'package:sidecar/src/features/profile/presentation/public_profile_screen.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_details_screen.dart';
@@ -36,8 +37,6 @@ abstract final class AppRoutes {
   static const identityVerification = '/verification/identity';
   static const driverLicense = '/verification/driver-license';
   static const vehicleProfile = '/verification/vehicle';
-  static const insuranceVerification = '/verification/insurance';
-  static const insuranceFallback = '/verification/insurance/manual';
   static const verificationComplete = '/verification/complete';
   static const safetyTools = '/safety';
   static const blockUser = '/safety/block';
@@ -54,6 +53,10 @@ abstract final class AppRoutes {
   static const messages = '/messages';
   static const chat = '/messages/:conversationId';
   static const account = '/account';
+  static const changePassword = '/account/change-password';
+  static const help = '/account/help';
+  static const cancellationPolicy = '/account/cancellation-policy';
+  static const deleteAccount = '/account/delete';
   static const publicProfile = '/profiles/:userId';
   static const stripeRedirect = '/stripe-redirect';
 
@@ -163,14 +166,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, _) => const VehicleProfileScreen(),
       ),
       GoRoute(
-        path: AppRoutes.insuranceVerification,
-        builder: (_, _) => const InsuranceVerificationScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.insuranceFallback,
-        builder: (_, _) => const InsuranceFallbackScreen(),
-      ),
-      GoRoute(
         path: AppRoutes.verificationComplete,
         builder: (_, _) => const VerificationCompleteScreen(),
       ),
@@ -205,6 +200,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: _rootNavigatorKey,
         builder: (_, state) =>
             PublicProfileScreen(userId: state.pathParameters['userId'] ?? ''),
+      ),
+      GoRoute(
+        path: AppRoutes.changePassword,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, _) => const ChangePasswordScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.help,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, _) => const HelpFaqScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.cancellationPolicy,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, _) => const CancellationPolicyScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.deleteAccount,
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, _) => const DeleteAccountScreen(),
       ),
       StatefulShellRoute.indexedStack(
         builder: (_, _, navigationShell) =>
