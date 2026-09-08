@@ -559,7 +559,17 @@ class _ProfileStatCard extends StatelessWidget {
         children: [
           Text(value, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 2),
-          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              label,
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(height: 1.1),
+            ),
+          ),
         ],
       ),
     );

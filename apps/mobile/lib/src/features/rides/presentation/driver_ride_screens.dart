@@ -194,237 +194,228 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
   @override
   Widget build(BuildContext context) {
     return RidePageScaffold(
-      body: Column(
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(24, 10, 24, 34),
         children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 10, 24, 24),
-              children: [
-                _PageHeader(
-                  title: 'Post a ride',
-                  onBack: () => context.go(AppRoutes.home),
+          _PageHeader(
+            title: 'Post a ride',
+            onBack: () => context.go(AppRoutes.home),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 109,
+            child: RideRouteCard(
+              origin: _origin?.displayName ?? '',
+              destination: _destination?.displayName ?? '',
+              originPlaceholder: 'Departure City',
+              destinationPlaceholder: 'Destination City',
+              routeMarkerColor: AppColors.ink,
+              locationTextStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+              ),
+              onOriginTap: () => _pickPlace(true),
+              onDestinationTap: () => _pickPlace(false),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _TapField(
+                  label: 'Date',
+                  value: _date == null
+                      ? 'Select date'
+                      : formatShortDate(_date!),
+                  placeholder: _date == null,
+                  onTap: _pickDate,
                 ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 109,
-                  child: RideRouteCard(
-                    origin: _origin?.displayName ?? '',
-                    destination: _destination?.displayName ?? '',
-                    originPlaceholder: 'Departure City',
-                    destinationPlaceholder: 'Destination City',
-                    routeMarkerColor: AppColors.ink,
-                    locationTextStyle: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w400,
-                    ),
-                    onOriginTap: () => _pickPlace(true),
-                    onDestinationTap: () => _pickPlace(false),
-                  ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _TapField(
+                  label: 'Time',
+                  value: _time?.format(context) ?? 'Select time',
+                  placeholder: _time == null,
+                  onTap: _pickTime,
                 ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _TapField(
-                        label: 'Date',
-                        value: _date == null
-                            ? 'Select date'
-                            : formatShortDate(_date!),
-                        placeholder: _date == null,
-                        onTap: _pickDate,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _TapField(
-                        label: 'Time',
-                        value: _time?.format(context) ?? 'Select time',
-                        placeholder: _time == null,
-                        onTap: _pickTime,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const _Label('Seats'),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              for (final seats in [1, 2, 3]) ...[
-                                _SeatOption(
-                                  label: '$seats',
-                                  selected: _seats == seats,
-                                  onTap: () => setState(() => _seats = seats),
-                                ),
-                                const SizedBox(width: 8),
-                              ],
-                              _SeatOption(
-                                label: '4+',
-                                selected: (_seats ?? 0) >= 4,
-                                onTap: _pickLargerSeatCount,
-                              ),
-                            ],
+                    const _Label('Seats'),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        for (final seats in [1, 2, 3]) ...[
+                          _SeatOption(
+                            label: '$seats',
+                            selected: _seats == seats,
+                            onTap: () => setState(() => _seats = seats),
                           ),
+                          const SizedBox(width: 8),
                         ],
-                      ),
+                        _SeatOption(
+                          label: '4+',
+                          selected: (_seats ?? 0) >= 4,
+                          onTap: _pickLargerSeatCount,
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 115,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const _Label('Price / seat'),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: _price,
-                            onChanged: (_) => setState(() {}),
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                              LengthLimitingTextInputFormatter(3),
-                            ],
-                            decoration: const InputDecoration(
-                              prefixIcon: Padding(
-                                padding: EdgeInsets.only(left: 13, right: 4),
-                                child: Align(
-                                  widthFactor: 1,
-                                  alignment: Alignment.centerLeft,
-                                  child: Text('\$'),
-                                ),
-                              ),
-                              prefixIconConstraints: BoxConstraints(
-                                minWidth: 27,
-                                minHeight: 20,
-                              ),
-                            ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 115,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _Label('Price / seat'),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _price,
+                      onChanged: (_) => setState(() {}),
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(3),
+                      ],
+                      decoration: const InputDecoration(
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.only(left: 13, right: 4),
+                          child: Align(
+                            widthFactor: 1,
+                            alignment: Alignment.centerLeft,
+                            child: Text('\$'),
                           ),
-                        ],
+                        ),
+                        prefixIconConstraints: BoxConstraints(
+                          minWidth: 27,
+                          minHeight: 20,
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 17),
-                const _Label('Luggage per rider'),
-                const SizedBox(height: 9),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      for (final entry in const [
-                        (LuggageAllowance.backpack, 'Backpack', 89.0),
-                        (LuggageAllowance.oneSuitcase, '1 suitcase', 105.0),
-                        (LuggageAllowance.twoPlusBags, '2+ bags', 82.0),
-                      ]) ...[
-                        SizedBox(
-                          width: entry.$3,
-                          child: RideChoiceChip(
-                            label: entry.$2,
-                            selected: _luggage == entry.$1,
-                            compact: true,
-                            onTap: () => setState(() => _luggage = entry.$1),
-                          ),
-                        ),
-                        const SizedBox(width: 9),
-                      ],
-                    ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 17),
+          const _Label('Luggage per rider'),
+          const SizedBox(height: 9),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final entry in const [
+                  (LuggageAllowance.backpack, 'Backpack', 89.0),
+                  (LuggageAllowance.oneSuitcase, '1 suitcase', 105.0),
+                  (LuggageAllowance.twoPlusBags, '2+ bags', 82.0),
+                ]) ...[
+                  SizedBox(
+                    width: entry.$3,
+                    child: RideChoiceChip(
+                      label: entry.$2,
+                      selected: _luggage == entry.$1,
+                      compact: true,
+                      onTap: () => setState(() => _luggage = entry.$1),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 17),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border.all(color: AppColors.border),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const _Label('Women only'),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Only women can request a seat',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: _womenOnly,
-                        activeTrackColor: AppColors.primary,
-                        onChanged: (value) =>
-                            setState(() => _womenOnly = value),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.information,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Drivers must:',
-                        style: TextStyle(
-                          fontFamily: 'Arial',
-                          color: AppColors.ink,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Carry active auto insurance during the trip\n'
-                        'Wait 10 minutes past pickup time before marking a no-show\n'
-                        'A 5% platform fee is deducted from your total reimbursement.',
-                        style: TextStyle(
-                          fontFamily: 'Arial',
-                          color: AppColors.secondaryInk,
-                          fontSize: 13,
-                          height: 1.3,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 14),
-                  Text(
-                    _error!,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.copyWith(color: AppColors.danger),
-                  ),
+                  const SizedBox(width: 9),
                 ],
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 12, 24, 34),
-            child: FilledButton(
-              style: AppButtonStyles.primaryFilled.copyWith(
-                minimumSize: const WidgetStatePropertyAll(Size.fromHeight(50)),
-              ),
-              onPressed: _saving ? null : _submit,
-              child: Text(_saving ? 'Posting…' : 'Post ride'),
+          const SizedBox(height: 17),
+          Container(
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: AppColors.border),
+              borderRadius: BorderRadius.circular(10),
             ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const _Label('Women only'),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Only women can request a seat',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _womenOnly,
+                  activeTrackColor: AppColors.primary,
+                  onChanged: (value) => setState(() => _womenOnly = value),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.information,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Drivers must:',
+                  style: TextStyle(
+                    fontFamily: 'Arial',
+                    color: AppColors.ink,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Carry active auto insurance during the trip\n'
+                  'Wait 10 minutes past pickup time before marking a no-show\n'
+                  'A 5% platform fee is deducted from your total reimbursement.',
+                  style: TextStyle(
+                    fontFamily: 'Arial',
+                    color: AppColors.secondaryInk,
+                    fontSize: 13,
+                    height: 1.3,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 14),
+            Text(
+              _error!,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: AppColors.danger),
+            ),
+          ],
+          const SizedBox(height: 18),
+          FilledButton(
+            style: AppButtonStyles.primaryFilled.copyWith(
+              minimumSize: const WidgetStatePropertyAll(Size.fromHeight(50)),
+            ),
+            onPressed: _saving ? null : _submit,
+            child: Text(_saving ? 'Posting…' : 'Post ride'),
           ),
         ],
       ),
