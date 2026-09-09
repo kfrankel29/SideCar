@@ -80,7 +80,7 @@ class _ReferralScreenState extends ConsumerState<ReferralScreen> {
       ref.invalidate(currentProfileProvider);
       _code.clear();
       if (mounted) {
-        showAppNotice(context, '\$5 credit added to both accounts.');
+        showAppNotice(context, '\$5 ride credit added to your account.');
         setState(_load);
       }
     } on FirebaseFunctionsException catch (error) {
@@ -97,7 +97,7 @@ class _ReferralScreenState extends ConsumerState<ReferralScreen> {
   }
 
   String _shareText(String code) =>
-      'Use my SideCar referral code $code. We will both get \$5 ride credit. '
+      'Use my SideCar referral code $code to get \$5 ride credit. '
       'https://www.ride-sidecar.com/';
 
   @override
@@ -133,13 +133,13 @@ class _ReferralScreenState extends ConsumerState<ReferralScreen> {
                 ),
                 const SizedBox(height: 30),
                 Text(
-                  'Give \$5, get \$5',
+                  'Get \$5 ride credit',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineLarge,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'When a friend redeems your code, both accounts receive ride credit. Your credit is automatically applied to your next ride.',
+                  'Enter another user\'s code to add \$5 to your account. Share your code so they can enter it and receive their own \$5 credit.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),

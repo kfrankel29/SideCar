@@ -9,6 +9,7 @@ import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 const require = createRequire(import.meta.url);
 const projectId = "sidecar-fb0e7";
 const iosAppId = "1:766275767825:ios:383d5eea95be5dc93cabb0";
+const androidAppId = "1:766275767825:android:b2109df465aa77ea3cabb0";
 const fixturePath = process.env.SIDECAR_FEEDBACK_FIXTURE_PATH ??
   "/tmp/sidecar-feedback-acceptance.json";
 const firebaseToolsRoot = process.env.SIDECAR_FIREBASE_TOOLS_ROOT;
@@ -86,13 +87,13 @@ async function createAccount(role, suffix) {
   return {email, password, uid: user.uid};
 }
 
-async function registerAppCheckDebugToken(debugToken, displayName) {
+async function registerAppCheckDebugToken(appId, debugToken, displayName) {
   const access = await cliAuth.getAccessToken(
     account.tokens.refresh_token,
     cliApi.getScopes(),
   );
   const response = await fetch(
-    `https://firebaseappcheck.googleapis.com/v1/projects/${projectId}/apps/${iosAppId}/debugTokens`,
+    `https://firebaseappcheck.googleapis.com/v1/projects/${projectId}/apps/${appId}/debugTokens`,
     {
       method: "POST",
       headers: {
@@ -112,14 +113,14 @@ async function registerAppCheckDebugToken(debugToken, displayName) {
   }
 }
 
-async function unregisterAppCheckDebugToken(debugToken) {
+async function unregisterAppCheckDebugToken(appId, debugToken) {
   if (!debugToken) return;
   const access = await cliAuth.getAccessToken(
     account.tokens.refresh_token,
     cliApi.getScopes(),
   );
   const listResponse = await fetch(
-    `https://firebaseappcheck.googleapis.com/v1/projects/${projectId}/apps/${iosAppId}/debugTokens?pageSize=100`,
+    `https://firebaseappcheck.googleapis.com/v1/projects/${projectId}/apps/${appId}/debugTokens?pageSize=100`,
     {headers: {authorization: `Bearer ${access.access_token}`}},
   );
   if (!listResponse.ok) {
@@ -149,16 +150,19 @@ async function ensureAppCheckDebugToken() {
     return;
   }
   const debugToken = randomUUID();
-  await registerAppCheckDebugToken(
-    debugToken,
-    `Feedback acceptance ${new Date().toISOString()}`,
-  );
+  await Promise.all([iosAppId, androidAppId].map((appId) =>
+    registerAppCheckDebugToken(
+      appId,
+      debugToken,
+      `Feedback acceptance ${new Date().toISOString()}`,
+    ),
+  ));
   await writeFile(fixturePath, `${JSON.stringify({
     ...fixture,
     SIDECAR_APP_CHECK_DEBUG_TOKEN: debugToken,
   })}\n`, {mode: 0o600});
   await chmod(fixturePath, 0o600);
-  process.stdout.write("Registered an isolated iOS App Check acceptance token.\n");
+  process.stdout.write("Registered an isolated iOS and Android App Check acceptance token.\n");
 }
 
 async function setup() {
@@ -371,7 +375,12 @@ async function cleanup() {
       if (error?.code !== "auth/user-not-found") throw error;
     });
   }
-  await unregisterAppCheckDebugToken(fixture.SIDECAR_APP_CHECK_DEBUG_TOKEN);
+  await Promise.all([iosAppId, androidAppId].map((appId) =>
+    unregisterAppCheckDebugToken(
+      appId,
+      fixture.SIDECAR_APP_CHECK_DEBUG_TOKEN,
+    ),
+  ));
   await unlink(fixturePath).catch(() => undefined);
   process.stdout.write(`Removed isolated feedback QA fixtures from ${projectId}.\n`);
 }

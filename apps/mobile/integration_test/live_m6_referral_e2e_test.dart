@@ -88,7 +88,8 @@ void main() {
       final firstAfter = await referralSummary();
       expect(
         (firstAfter['creditCents'] as num).toInt(),
-        (firstBefore['creditCents'] as num).toInt() + 500,
+        (firstBefore['creditCents'] as num).toInt(),
+        reason: 'Only the account entering the code receives credit.',
       );
     } else {
       expect(

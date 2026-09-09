@@ -395,12 +395,13 @@ class _RateRidersScreenState extends ConsumerState<RateRidersScreen> {
                   ),
                   const SizedBox(height: 20),
                   Container(
+                    key: const ValueKey('driver-reimbursement-card'),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
                       vertical: 22,
                     ),
                     decoration: BoxDecoration(
-                      color: AppColors.ink,
+                      color: AppColors.primary,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(

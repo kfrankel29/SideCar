@@ -6,6 +6,7 @@ import 'package:sidecar/src/app.dart';
 import 'package:sidecar/src/core/config/business_config_repository.dart';
 import 'package:sidecar/src/core/firebase/app_bootstrap.dart';
 import 'package:sidecar/src/core/firebase/firebase_runtime_options.dart';
+import 'package:sidecar/src/core/maps/google_maps_initializer.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart';
@@ -27,6 +28,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeGoogleMapsPlatform();
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
   final bootstrap = await AppBootstrap.initialize();

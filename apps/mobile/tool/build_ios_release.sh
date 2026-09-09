@@ -17,6 +17,7 @@ required_keys=(
   FIREBASE_MESSAGING_SENDER_ID
   FIREBASE_PROJECT_ID
   FIREBASE_STORAGE_BUCKET
+  MAPS_API_KEY
 )
 
 for key in $required_keys; do
@@ -25,6 +26,10 @@ for key in $required_keys; do
     exit 1
   fi
 done
+
+maps_api_key=$(jq -r '.MAPS_API_KEY' "$config_file")
+maps_xcconfig=$app_dir/.local/GoogleMaps.xcconfig
+print -r -- "GOOGLE_MAPS_API_KEY = $maps_api_key" > "$maps_xcconfig"
 
 cd "$app_dir"
 flutter build ipa --release --dart-define-from-file="$config_file"

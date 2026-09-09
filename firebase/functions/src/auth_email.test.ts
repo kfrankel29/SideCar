@@ -7,7 +7,7 @@ import {
   defaultAuthEmailSender,
 } from "./auth_email.js";
 
-test("authentication email uses the ride-sidecar verification sender", () => {
+test("authentication email uses the verified SideCar sender", () => {
   const email = authEmailEnvelope({
     to: "student@ucsb.edu",
     subject: "Verify your SideCar email",

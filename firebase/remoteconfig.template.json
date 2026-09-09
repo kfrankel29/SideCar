@@ -19,7 +19,7 @@
       "valueType": "JSON"
     },
     "auth_email_sender": {
-      "defaultValue": {"value": "SideCar <verify@ride-sidecar.com>"},
+      "defaultValue": {"value": "SideCar <verify@savemypad.com>"},
       "description": "Verified sender used for SideCar email verification and password reset codes.",
       "valueType": "STRING"
     },

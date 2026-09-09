@@ -49,6 +49,8 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>GoogleMapsAPIKey</key>
+	<string>$(GOOGLE_MAPS_API_KEY)</string>
 	<key>NSCameraUsageDescription</key>
 	<string>SideCar uses the camera only when you choose to take a profile photo.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

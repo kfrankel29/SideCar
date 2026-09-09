@@ -10,9 +10,7 @@ import UIKit
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     if
-      let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-      let configuration = NSDictionary(contentsOfFile: path),
-      let mapsAPIKey = configuration["API_KEY"] as? String,
+      let mapsAPIKey = Bundle.main.object(forInfoDictionaryKey: "GoogleMapsAPIKey") as? String,
       !mapsAPIKey.isEmpty
     {
       GMSServices.provideAPIKey(mapsAPIKey)

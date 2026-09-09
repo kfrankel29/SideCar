@@ -102,11 +102,6 @@ export const redeemReferralCode = onCall(
         referralRedeemedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       }, {merge: true});
-      transaction.set(ownerReference, {
-        creditCents: FieldValue.increment(referralCreditCents),
-        referralRewardsCents: FieldValue.increment(referralCreditCents),
-        updatedAt: FieldValue.serverTimestamp(),
-      }, {merge: true});
       transaction.create(
         db.collection("referral_redemptions").doc(request.auth!.uid),
         {

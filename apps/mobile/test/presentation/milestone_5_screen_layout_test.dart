@@ -191,6 +191,13 @@ void main() {
     expect(find.text('Rate your riders'), findsOneWidget);
     expect(find.text('Nice drive'), findsOneWidget);
     expect(find.text('Maya C.'), findsOneWidget);
+    final reimbursementCard = tester.widget<Container>(
+      find.byKey(const ValueKey('driver-reimbursement-card')),
+    );
+    expect(
+      (reimbursementCard.decoration as BoxDecoration).color,
+      AppColors.primary,
+    );
     await tester.tap(find.text('Easy pickup'));
     await tester.tap(find.byKey(const ValueKey('rider-booking-1-5')));
     await tester.tap(find.text('Done'));

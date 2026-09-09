@@ -13,10 +13,14 @@ import 'package:sidecar/src/features/rides/data/firebase_ride_repository.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
 import 'package:sidecar/src/features/rides/domain/ride_repository.dart';
 import 'package:sidecar/src/features/rides/presentation/place_picker_sheet.dart';
+import 'package:sidecar/src/core/maps/google_maps_initializer.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  const visualPauseMs = int.fromEnvironment('M5_VISUAL_PAUSE_MS');
+
+  setUpAll(initializeGoogleMapsPlatform);
 
   Future<void> capture(String name) async {
     if (Platform.isAndroid) {
@@ -36,9 +40,7 @@ void main() {
     final response = await request.close();
     await response.drain<void>();
     client.close(force: true);
-    debugPrint(
-      'M5_FEEDBACK_SCREENSHOT_HTTP=$name:${response.statusCode}',
-    );
+    debugPrint('M5_FEEDBACK_SCREENSHOT_HTTP=$name:${response.statusCode}');
   }
 
   testWidgets('rating submit and skip both return to home', (tester) async {
@@ -88,6 +90,31 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.skippedBookingId, 'booking-feedback');
     expect(find.text('Open rating'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('driver reimbursement card uses SideCar blue', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookingRepositoryProvider.overrideWithValue(_RatingRepository()),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: RateRidersScreen(bookings: [_booking()]),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final reimbursementCard = tester.widget<Container>(
+      find.byKey(const ValueKey('driver-reimbursement-card')),
+    );
+    expect(
+      (reimbursementCard.decoration as BoxDecoration).color,
+      AppColors.primary,
+    );
+    expect(find.text('YOU WERE REIMBURSED'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -175,6 +202,11 @@ void main() {
       expect(find.text('Second Test Gas'), findsOneWidget);
       expect(find.text('Third Test Gas'), findsOneWidget);
       expect(find.text('Hidden Test Gas'), findsNothing);
+      if (visualPauseMs > 0) {
+        debugPrint('M5_FEEDBACK_VISUAL_PAUSE=$visualPauseMs');
+        await Future<void>.delayed(Duration(milliseconds: visualPauseMs));
+        await tester.pump();
+      }
       await capture('m7-address-gas-stations');
 
       final gasMarker = updatedMap.markers.firstWhere(
