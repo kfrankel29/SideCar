@@ -13,13 +13,13 @@ const region = "us-central1";
 
 const activeRideStatuses = new Set(["open", "in_progress"]);
 const activeBookingStatuses = new Set([
-  "requested",
-  "accepted",
-  "payment_pending",
+  "pending_driver",
+  "accepted_payment_pending",
   "payment_processing",
   "confirmed",
   "in_progress",
   "cancellation_processing",
+  "completion_processing",
   "payout_held",
 ]);
 

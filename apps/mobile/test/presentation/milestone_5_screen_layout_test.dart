@@ -472,6 +472,53 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('route place search keeps keyboard focus as results update', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    tester.view.physicalSize = const Size(375, 2000);
+    final repository = _RoutePickerFake();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [rideRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: const Scaffold(
+            body: PlacePickerSheet(
+              title: 'Where are you leaving from?',
+              initialQuery: '',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final searchField = find.byKey(const ValueKey('place-search-field'));
+    await tester.enterText(searchField, 'is');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    var editable = tester.widget<EditableText>(
+      find.descendant(of: searchField, matching: find.byType(EditableText)),
+    );
+    expect(editable.focusNode.hasFocus, isTrue);
+    expect(tester.testTextInput.isRegistered, isTrue);
+    expect(find.text('Search results'), findsOneWidget);
+
+    await tester.enterText(searchField, 'isla');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    editable = tester.widget<EditableText>(
+      find.descendant(of: searchField, matching: find.byType(EditableText)),
+    );
+    expect(repository.searchQuery, 'isla');
+    expect(editable.focusNode.hasFocus, isTrue);
+    expect(tester.testTextInput.isRegistered, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   test('conversation visibility is scoped to the blocking user', () {
     final conversation = _MessagingFake().conversation;
     final hidden = RideConversation(

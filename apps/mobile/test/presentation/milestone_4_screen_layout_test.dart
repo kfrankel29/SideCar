@@ -104,6 +104,30 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('payout balance uses the app blue card', (tester) async {
+    await setPhoneSize(tester);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bookingRepositoryProvider.overrideWithValue(_M4Repository()),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: const PayoutHistoryScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final card = tester.widget<Container>(
+      find.byKey(const ValueKey('payout-balance-card')),
+    );
+    final decoration = card.decoration! as BoxDecoration;
+    expect(decoration.color, AppColors.primary);
+    expect(find.text('PAYOUT BALANCE'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('rider can swipe between all My rides tabs', (tester) async {
     await setPhoneSize(tester);
     await tester.pumpWidget(
@@ -232,14 +256,16 @@ void main() {
 
     expect(find.text('Pickup order'), findsOneWidget);
     expect(find.text('Honda Civic'), findsOneWidget);
-    expect(find.text('Maya Chen'), findsOneWidget);
+    expect(find.text('Maya Chen'), findsNWidgets(2));
     expect(find.text('ETA 3:15 PM'), findsOneWidget);
     expect(find.text('Drop-off order'), findsOneWidget);
+    expect(find.text('95 University Ave, Palo Alto, CA 94301'), findsOneWidget);
+    expect(find.text('ETA 8:15 PM'), findsOneWidget);
     expect(
       find.text(
         'The remaining route will be optimized after every rider is picked up.',
       ),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.text('Enter rider pickup code'), findsOneWidget);
 
@@ -430,6 +456,16 @@ class _M4Repository extends UnavailableBookingRepository {
   String? ratedBookingId;
   int? driverRating;
   int? tripRating;
+
+  @override
+  Future<DriverPayoutStatus> getDriverPayoutStatus() async =>
+      const DriverPayoutStatus(
+        connected: true,
+        payoutsEnabled: true,
+        detailsSubmitted: true,
+        availableCents: 10000,
+        pendingCents: 4875,
+      );
 
   @override
   Future<void> completeDriverTrip(String rideId) async {

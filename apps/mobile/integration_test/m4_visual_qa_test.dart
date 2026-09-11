@@ -32,6 +32,7 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   final repository = _M4VisualRepository();
   const holdForExternalCapture = bool.fromEnvironment('M4_QA_HOLD');
+  const skipScreenshotCapture = bool.fromEnvironment('M4_QA_SKIP_CAPTURE');
   const holdSeconds = int.fromEnvironment(
     'M4_QA_HOLD_SECONDS',
     defaultValue: 30,
@@ -43,7 +44,7 @@ void main() {
     // runner does not register the screenshot surface conversion channel.
     // Functional assertions still run on Android; iOS remains the visual
     // screenshot source for this shared Flutter UI.
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || skipScreenshotCapture) {
       debugPrint('QA_SCREENSHOT_SKIPPED_ANDROID=$name');
       return;
     }
@@ -267,6 +268,16 @@ void main() {
     expect(find.text('Picking up riders'), findsOneWidget);
     expect(find.text('Pickup order'), findsOneWidget);
     expect(find.text('Drop-off order'), findsOneWidget);
+    expect(
+      find.text('95 University Avenue, Palo Alto, CA 94301'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'The remaining route will be optimized after every rider is picked up.',
+      ),
+      findsNothing,
+    );
     expect(find.text('Enter rider pickup code'), findsOneWidget);
     expect(find.text('Maya Chen'), findsWidgets);
     expect(find.text('Lena Park'), findsWidgets);
@@ -358,6 +369,10 @@ void main() {
     await show(const PayoutHistoryScreen());
     expect(find.text('PAYOUT BALANCE'), findsOneWidget);
     expect(find.text(r'$450.00'), findsOneWidget);
+    final payoutCard = tester.widget<Container>(
+      find.byKey(const ValueKey('payout-balance-card')),
+    );
+    expect((payoutCard.decoration! as BoxDecoration).color, AppColors.primary);
     expect(
       find.text('Pardall Rd → Palo Alto'),
       findsOneWidget,

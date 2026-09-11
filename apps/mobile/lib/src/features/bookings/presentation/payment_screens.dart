@@ -389,9 +389,10 @@ class PayoutHistoryScreen extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
             children: [
               Container(
+                key: const ValueKey('payout-balance-card'),
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
-                  color: AppColors.ink,
+                  color: AppColors.primary,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Column(

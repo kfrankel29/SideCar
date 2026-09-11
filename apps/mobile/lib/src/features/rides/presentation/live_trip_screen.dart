@@ -136,17 +136,13 @@ class _LiveTripScreenState extends ConsumerState<LiveTripScreen>
                               openNavigation: widget.isDriver,
                             ),
                             const SizedBox(height: 24),
-                            if (!widget.isDriver ||
-                                plan.phase != LiveTripPhase.pickups)
-                              _StopSection(
-                                title: 'Drop-off order',
-                                subtitle: 'Optimized for the remaining route',
-                                stops: plan.dropoffStops,
-                                active: plan.phase != LiveTripPhase.pickups,
-                                openNavigation: widget.isDriver,
-                              )
-                            else
-                              const _DropoffPendingCard(),
+                            _StopSection(
+                              title: 'Drop-off order',
+                              subtitle: 'Optimized for the remaining route',
+                              stops: plan.dropoffStops,
+                              active: plan.phase != LiveTripPhase.pickups,
+                              openNavigation: widget.isDriver,
+                            ),
                           ],
                         ],
                       ),
@@ -472,31 +468,6 @@ class _LiveBadge extends StatelessWidget {
     child: const Text(
       'LIVE',
       style: TextStyle(color: Colors.white, fontSize: 11),
-    ),
-  );
-}
-
-class _DropoffPendingCard extends StatelessWidget {
-  const _DropoffPendingCard();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: AppColors.softSurface,
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Drop-off order', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 4),
-        Text(
-          'The remaining route will be optimized after every rider is picked up.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
     ),
   );
 }

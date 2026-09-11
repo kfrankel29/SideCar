@@ -301,9 +301,24 @@ void main() {
 
     await tester.tap(find.byType(TextField));
     await tester.pump();
-    await tester.enterText(find.byType(TextField), 'San Jose');
+    final searchField = find.byKey(const ValueKey('place-search-field'));
+    await tester.enterText(searchField, 'San');
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
+
+    var editable = tester.widget<EditableText>(
+      find.descendant(of: searchField, matching: find.byType(EditableText)),
+    );
+    expect(editable.focusNode.hasFocus, isTrue);
+
+    await tester.enterText(searchField, 'San Jose');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    editable = tester.widget<EditableText>(
+      find.descendant(of: searchField, matching: find.byType(EditableText)),
+    );
+    expect(editable.focusNode.hasFocus, isTrue);
 
     expect(find.text('Search results'), findsOneWidget);
     expect(find.text('San Jose'), findsNWidgets(2));

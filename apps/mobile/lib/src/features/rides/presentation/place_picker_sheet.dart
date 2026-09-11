@@ -117,6 +117,10 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
 
   void _changed(String _) {
     _debounce?.cancel();
+    // Switch to the results layout immediately while preserving the keyed
+    // search field. Without this rebuild, the first async result rebuild moves
+    // an unkeyed TextField to a different child index and iOS drops its focus.
+    setState(() {});
     _debounce = Timer(const Duration(milliseconds: 350), _search);
   }
 
@@ -456,6 +460,7 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
           ],
           SizedBox(height: showingSearch ? 8 : 18),
           TextField(
+            key: const ValueKey('place-search-field'),
             controller: _query,
             focusNode: _queryFocus,
             autofocus: widget.rideId.isEmpty,

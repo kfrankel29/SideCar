@@ -8,7 +8,10 @@ test("account deletion blocks open rides", () => {
 });
 
 test("account deletion blocks unsettled booking states", () => {
-  assert.equal(hasOpenAccountObligations([], ["payment_pending"]), true);
+  assert.equal(hasOpenAccountObligations([], ["pending_driver"]), true);
+  assert.equal(hasOpenAccountObligations([], ["accepted_payment_pending"]), true);
+  assert.equal(hasOpenAccountObligations([], ["payment_processing"]), true);
+  assert.equal(hasOpenAccountObligations([], ["completion_processing"]), true);
   assert.equal(hasOpenAccountObligations([], ["payout_held"]), true);
 });
 
@@ -18,6 +21,10 @@ test("account deletion allows settled history", () => {
       ["completed", "cancelled"],
       ["completed", "refunded", "cancelled"],
     ),
+    false,
+  );
+  assert.equal(
+    hasOpenAccountObligations([], ["requested", "accepted", "payment_pending"]),
     false,
   );
 });
