@@ -47,16 +47,22 @@ void main() {
 
     final button = find.widgetWithText(FilledButton, 'Delete account');
     expect(tester.widget<FilledButton>(button).onPressed, isNull);
-    await tester.enterText(find.byType(TextField), 'delete');
+    final confirmation = find.byKey(const Key('delete-confirmation-field'));
+    final password = find.byKey(const Key('delete-password-field'));
+    await tester.enterText(confirmation, 'delete');
     await tester.pump();
     expect(tester.widget<FilledButton>(button).onPressed, isNull);
-    await tester.enterText(find.byType(TextField), 'DELETE');
+    await tester.enterText(confirmation, 'DELETE');
+    await tester.pump();
+    expect(tester.widget<FilledButton>(button).onPressed, isNull);
+    await tester.enterText(password, 'current-password');
     await tester.pump();
     expect(tester.widget<FilledButton>(button).onPressed, isNotNull);
     await tester.tap(button);
     await tester.pumpAndSettle();
 
     expect(repository.deletedWith, 'DELETE');
+    expect(repository.currentDeletionPassword, 'current-password');
     expect(find.text('Welcome'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -154,6 +160,10 @@ class _AccountSecurityFake implements AccountSecurityRepository {
   String? currentPassword;
   String? newPassword;
   String? deletedWith;
+  String? currentDeletionPassword;
+
+  @override
+  bool get requiresPasswordForDeletion => true;
 
   @override
   Future<void> changePassword({
@@ -165,8 +175,12 @@ class _AccountSecurityFake implements AccountSecurityRepository {
   }
 
   @override
-  Future<void> deleteAccount({required String confirmation}) async {
+  Future<void> deleteAccount({
+    required String confirmation,
+    String currentPassword = '',
+  }) async {
     deletedWith = confirmation;
+    currentDeletionPassword = currentPassword;
   }
 }
 

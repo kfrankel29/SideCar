@@ -28,3 +28,39 @@ test("account deletion allows settled history", () => {
     false,
   );
 });
+
+test("account deletion blocks current published trips", () => {
+  const now = Date.parse("2026-09-12T12:00:00.000Z");
+  assert.equal(
+    hasOpenAccountObligations(
+      [{status: "published", departureAt: "2026-09-12T13:00:00.000Z"}],
+      [],
+      now,
+    ),
+    true,
+  );
+});
+
+test("account deletion ignores stale operational trip states", () => {
+  const now = Date.parse("2026-09-12T12:00:00.000Z");
+  assert.equal(
+    hasOpenAccountObligations(
+      [{status: "open", departureAt: "2026-09-10T10:00:00.000Z"}],
+      [{status: "confirmed", departureAt: "2026-09-10T10:00:00.000Z"}],
+      now,
+    ),
+    false,
+  );
+});
+
+test("account deletion still blocks unresolved financial processing", () => {
+  const now = Date.parse("2026-09-12T12:00:00.000Z");
+  assert.equal(
+    hasOpenAccountObligations(
+      [],
+      [{status: "payment_processing", departureAt: "2026-09-01T10:00:00.000Z"}],
+      now,
+    ),
+    true,
+  );
+});

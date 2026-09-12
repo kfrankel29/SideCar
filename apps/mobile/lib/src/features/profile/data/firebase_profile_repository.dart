@@ -15,6 +15,8 @@ class FirebaseProfileRepository implements ProfileRepository {
   final FirebaseFirestore _firestore;
   final FirebaseStorage _storage;
   static const _operationTimeout = Duration(seconds: 20);
+  static const _photoUploadTimeout = Duration(seconds: 90);
+  static const _maximumPhotoBytes = 5 * 1024 * 1024;
 
   @override
   Stream<UserProfile?> watchCurrentProfile() {
@@ -56,6 +58,9 @@ class FirebaseProfileRepository implements ProfileRepository {
     if (!contentType.startsWith('image/')) {
       throw const AppFailure('Choose a valid photo.');
     }
+    if (bytes.isEmpty || bytes.lengthInBytes >= _maximumPhotoBytes) {
+      throw const AppFailure('Choose a photo smaller than 5 MB.');
+    }
     final reference = _storage.ref('users/${user.uid}/profile/profile.jpg');
     await reference
         .putData(
@@ -66,7 +71,7 @@ class FirebaseProfileRepository implements ProfileRepository {
           ),
         )
         .timeout(
-          _operationTimeout,
+          _photoUploadTimeout,
           onTimeout: () => throw const AppFailure(
             'Your photo took too long to upload. Check your connection and try again.',
           ),

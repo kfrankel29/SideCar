@@ -6,12 +6,17 @@ import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/features/auth/data/auth_error_mapper.dart';
 
 abstract interface class AccountSecurityRepository {
+  bool get requiresPasswordForDeletion;
+
   Future<void> changePassword({
     required String currentPassword,
     required String newPassword,
   });
 
-  Future<void> deleteAccount({required String confirmation});
+  Future<void> deleteAccount({
+    required String confirmation,
+    String currentPassword = '',
+  });
 }
 
 final accountSecurityRepositoryProvider = Provider<AccountSecurityRepository>((
@@ -31,6 +36,14 @@ class FirebaseAccountSecurityRepository implements AccountSecurityRepository {
 
   final FirebaseAuth _auth;
   final FirebaseFunctions _functions;
+
+  @override
+  bool get requiresPasswordForDeletion {
+    final providers = _auth.currentUser?.providerData
+        .map((provider) => provider.providerId)
+        .toSet();
+    return providers == null || !providers.contains('google.com');
+  }
 
   @override
   Future<void> changePassword({
@@ -61,12 +74,36 @@ class FirebaseAccountSecurityRepository implements AccountSecurityRepository {
   }
 
   @override
-  Future<void> deleteAccount({required String confirmation}) async {
+  Future<void> deleteAccount({
+    required String confirmation,
+    String currentPassword = '',
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) throw const AppFailure('Please sign in again.');
     try {
+      if (requiresPasswordForDeletion) {
+        final email = user.email;
+        if (email == null || currentPassword.isEmpty) {
+          throw const AppFailure(
+            'Enter your current password to delete your account.',
+          );
+        }
+        await user.reauthenticateWithCredential(
+          EmailAuthProvider.credential(email: email, password: currentPassword),
+        );
+      } else {
+        await user.reauthenticateWithProvider(GoogleAuthProvider());
+      }
+      await user.getIdToken(true);
       await _functions.httpsCallable('requestAccountDeletion').call<void>({
         'confirmation': confirmation,
       });
       await _auth.signOut();
+    } on FirebaseAuthException catch (error) {
+      throw AuthErrorMapper.firebaseAuth(
+        code: error.code,
+        firebaseMessage: error.message,
+      );
     } on FirebaseFunctionsException catch (error) {
       throw AuthErrorMapper.functions(
         code: error.code,
@@ -84,6 +121,9 @@ class UnavailableAccountSecurityRepository
     implements AccountSecurityRepository {
   const UnavailableAccountSecurityRepository();
 
+  @override
+  bool get requiresPasswordForDeletion => true;
+
   Never _notReady() => throw const AppFailure(
     'We can’t connect right now. Install the latest build and try again.',
   );
@@ -95,6 +135,8 @@ class UnavailableAccountSecurityRepository
   }) async => _notReady();
 
   @override
-  Future<void> deleteAccount({required String confirmation}) async =>
-      _notReady();
+  Future<void> deleteAccount({
+    required String confirmation,
+    String currentPassword = '',
+  }) async => _notReady();
 }

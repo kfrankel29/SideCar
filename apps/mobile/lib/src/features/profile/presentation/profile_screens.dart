@@ -372,7 +372,7 @@ class _ProfilePhotoCropScreenState extends State<_ProfilePhotoCropScreen> {
       final boundary =
           _cropKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) return;
-      final image = await boundary.toImage(pixelRatio: 3);
+      final image = await boundary.toImage(pixelRatio: 2);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (!mounted || data == null) return;
       Navigator.pop(context, data.buffer.asUint8List());

@@ -11,24 +11,68 @@ const db = getFirestore();
 const storage = getStorage();
 const region = "us-central1";
 
-const activeRideStatuses = new Set(["open", "in_progress"]);
-const activeBookingStatuses = new Set([
+const activeRideStatuses = new Set(["open", "published", "in_progress"]);
+const scheduledBookingStatuses = new Set([
   "pending_driver",
   "accepted_payment_pending",
-  "payment_processing",
   "confirmed",
   "in_progress",
+]);
+const financialBookingStatuses = new Set([
+  "payment_processing",
   "cancellation_processing",
   "completion_processing",
   "payout_held",
 ]);
 
+type AccountObligationRecord = {
+  status?: unknown;
+  departureAt?: unknown;
+};
+
+const staleTripGraceMs = 24 * 60 * 60 * 1000;
+
+function timestampMillis(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (value && typeof value === "object") {
+    const timestamp = value as {toMillis?: () => number; toDate?: () => Date};
+    if (typeof timestamp.toMillis === "function") return timestamp.toMillis();
+    if (typeof timestamp.toDate === "function") return timestamp.toDate().getTime();
+  }
+  return null;
+}
+
+function record(value: unknown): AccountObligationRecord {
+  if (value && typeof value === "object") return value as AccountObligationRecord;
+  return {status: value};
+}
+
+function isCurrentTrip(value: AccountObligationRecord, nowMs: number): boolean {
+  const departureAt = timestampMillis(value.departureAt);
+  return departureAt === null || departureAt >= nowMs - staleTripGraceMs;
+}
+
 export function hasOpenAccountObligations(
-  rideStatuses: unknown[],
-  bookingStatuses: unknown[],
+  rideRecords: unknown[],
+  bookingRecords: unknown[],
+  nowMs = Date.now(),
 ): boolean {
-  return rideStatuses.some((value) => activeRideStatuses.has(String(value))) ||
-    bookingStatuses.some((value) => activeBookingStatuses.has(String(value)));
+  const ridesBlock = rideRecords.some((value) => {
+    const candidate = record(value);
+    return activeRideStatuses.has(String(candidate.status)) &&
+      isCurrentTrip(candidate, nowMs);
+  });
+  if (ridesBlock) return true;
+  return bookingRecords.some((value) => {
+    const candidate = record(value);
+    const status = String(candidate.status);
+    if (financialBookingStatuses.has(status)) return true;
+    return scheduledBookingStatuses.has(status) && isCurrentTrip(candidate, nowMs);
+  });
 }
 
 export const requestAccountDeletion = onCall(
@@ -66,8 +110,8 @@ export const requestAccountDeletion = onCall(
       ...driverBookings.docs.map((document) => [document.id, document] as const),
     ]);
     if (hasOpenAccountObligations(
-      rides.docs.map((document) => document.data().status),
-      [...bookingDocuments.values()].map((document) => document.data().status),
+      rides.docs.map((document) => document.data()),
+      [...bookingDocuments.values()].map((document) => document.data()),
     )) {
       throw new HttpsError(
         "failed-precondition",

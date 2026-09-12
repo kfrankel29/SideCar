@@ -4,7 +4,7 @@ import {randomBytes} from "node:crypto";
 
 import {applicationDefault, deleteApp, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
-import {FieldValue, getFirestore} from "firebase-admin/firestore";
+import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 
 const require = createRequire(import.meta.url);
@@ -166,6 +166,37 @@ async function reset() {
   process.stdout.write(`Reset reusable M6 QA state in ${projectId}.\n`);
 }
 
+async function seedStaleDeletionState() {
+  const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
+  const departureAt = Timestamp.fromMillis(Date.now() - (48 * 60 * 60 * 1000));
+  const rideId = `m6-stale-delete-${fixture.M6_USER_UID}`;
+  const bookingId = `m6-stale-delete-booking-${fixture.M6_USER_UID}`;
+  await Promise.all([
+    db.collection("rides").doc(rideId).set({
+      driverId: fixture.M6_USER_UID,
+      status: "open",
+      departureAt,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }),
+    db.collection("bookings").doc(bookingId).set({
+      riderId: fixture.M6_USER_UID,
+      driverId: "m6-stale-delete-driver",
+      status: "confirmed",
+      departureAt,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }),
+  ]);
+  await writeFile(fixturePath, `${JSON.stringify({
+    ...fixture,
+    M6_DELETION_RIDE_ID: rideId,
+    M6_DELETION_BOOKING_ID: bookingId,
+  })}\n`, {mode: 0o600});
+  await chmod(fixturePath, 0o600);
+  process.stdout.write("Seeded isolated stale deletion state.\n");
+}
+
 async function cleanup() {
   const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
   const uids = [
@@ -177,6 +208,12 @@ async function cleanup() {
   await Promise.all([
     bucket.file(fixture.M6_APPROVAL_OBJECT_PATH).delete({ignoreNotFound: true}),
     bucket.file(fixture.M6_REJECTION_OBJECT_PATH).delete({ignoreNotFound: true}),
+    fixture.M6_DELETION_RIDE_ID ?
+      db.collection("rides").doc(fixture.M6_DELETION_RIDE_ID).delete() :
+      Promise.resolve(),
+    fixture.M6_DELETION_BOOKING_ID ?
+      db.collection("bookings").doc(fixture.M6_DELETION_BOOKING_ID).delete() :
+      Promise.resolve(),
   ]);
   for (const uid of uids) {
     await db.recursiveDelete(db.collection("users").doc(uid));
@@ -195,8 +232,9 @@ async function cleanup() {
 try {
   if (command === "setup") await setup();
   else if (command === "reset") await reset();
+  else if (command === "seed-stale-deletion") await seedStaleDeletionState();
   else if (command === "cleanup") await cleanup();
-  else throw new Error("Use setup, reset, or cleanup.");
+  else throw new Error("Use setup, reset, seed-stale-deletion, or cleanup.");
 } finally {
   await deleteApp(app);
   await unlink(credentialPath).catch(() => undefined);

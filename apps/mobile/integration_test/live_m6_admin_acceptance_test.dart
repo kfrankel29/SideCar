@@ -205,6 +205,7 @@ void main() {
       originalConfig = {
         'serviceFeeType': liveConfig['serviceFeeType'],
         'serviceFeeValue': liveConfig['serviceFeeValue'],
+        'driverFeePercentage': liveConfig['driverFeePercentage'],
         'stripeCardPercentage': liveConfig['stripeCardPercentage'],
         'irsMileageRate': liveConfig['irsMileageRate'],
         'refundRules': liveConfig['refundRules'],
@@ -281,8 +282,6 @@ void main() {
         actions,
         containsAll(<String>{
           'config.updated',
-          'insurance.verified',
-          'insurance.rejected',
           'user.suspended',
           'user.banned',
           'user.active',

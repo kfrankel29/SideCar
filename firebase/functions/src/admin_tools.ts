@@ -575,8 +575,8 @@ export const adminDeleteUserAccount = onCall(
       ...driverBookings.docs.map((document) => [document.id, document] as const),
     ]);
     if (hasOpenAccountObligations(
-      rides.docs.map((document) => document.data().status),
-      [...bookingDocuments.values()].map((document) => document.data().status),
+      rides.docs.map((document) => document.data()),
+      [...bookingDocuments.values()].map((document) => document.data()),
     )) {
       throw new HttpsError(
         "failed-precondition",

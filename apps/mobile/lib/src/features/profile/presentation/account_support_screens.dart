@@ -23,11 +23,13 @@ class DeleteAccountScreen extends ConsumerStatefulWidget {
 
 class _DeleteAccountScreenState extends ConsumerState<DeleteAccountScreen> {
   final _controller = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _deleting = false;
 
   @override
   void dispose() {
     _controller.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -37,7 +39,10 @@ class _DeleteAccountScreenState extends ConsumerState<DeleteAccountScreen> {
     try {
       await ref
           .read(accountSecurityRepositoryProvider)
-          .deleteAccount(confirmation: _controller.text.trim());
+          .deleteAccount(
+            confirmation: _controller.text.trim(),
+            currentPassword: _passwordController.text,
+          );
       if (mounted) context.go(AppRoutes.welcome);
     } on AppFailure catch (error) {
       if (mounted) {
@@ -50,7 +55,12 @@ class _DeleteAccountScreenState extends ConsumerState<DeleteAccountScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canDelete = _controller.text.trim() == 'DELETE' && !_deleting;
+    final repository = ref.read(accountSecurityRepositoryProvider);
+    final needsPassword = repository.requiresPasswordForDeletion;
+    final canDelete =
+        _controller.text.trim() == 'DELETE' &&
+        (!needsPassword || _passwordController.text.isNotEmpty) &&
+        !_deleting;
     return _FinalDraftPage(
       title: 'Delete your account?',
       body: Column(
@@ -73,6 +83,7 @@ class _DeleteAccountScreenState extends ConsumerState<DeleteAccountScreen> {
           const SizedBox(height: 14),
           const FieldLabel('Type DELETE to confirm'),
           TextField(
+            key: const Key('delete-confirmation-field'),
             controller: _controller,
             textCapitalization: TextCapitalization.characters,
             autocorrect: false,
@@ -80,6 +91,20 @@ class _DeleteAccountScreenState extends ConsumerState<DeleteAccountScreen> {
             onChanged: (_) => setState(() {}),
             decoration: const InputDecoration(hintText: 'DELETE'),
           ),
+          const SizedBox(height: 14),
+          if (needsPassword) ...[
+            const FieldLabel('Current password'),
+            PasswordFormField(
+              key: const Key('delete-password-field'),
+              controller: _passwordController,
+              hintText: 'Enter your current password',
+              onChanged: (_) => setState(() {}),
+            ),
+          ] else
+            Text(
+              'You’ll confirm with Google before your account is deleted.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
         ],
       ),
       bottom: Column(
