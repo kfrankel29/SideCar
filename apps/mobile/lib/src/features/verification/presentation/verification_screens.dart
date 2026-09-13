@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
 import 'package:sidecar/src/core/widgets/sidecar_scaffold.dart';
+import 'package:sidecar/src/features/auth/presentation/guest_access.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/verification/domain/verification_models.dart';
@@ -951,14 +952,16 @@ class _DocumentAction extends StatelessWidget {
   }
 }
 
-class VerificationCompleteScreen extends StatelessWidget {
+class VerificationCompleteScreen extends ConsumerWidget {
   const VerificationCompleteScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return SideCarScaffold(
       bottom: FilledButton(
-        onPressed: AppHaptics.wrap(() => context.go(AppRoutes.home)),
+        onPressed: AppHaptics.wrap(
+          () => context.go(takePendingAuthDestination(ref)),
+        ),
         child: const Text('Continue to SideCar'),
       ),
       fillViewport: true,

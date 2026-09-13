@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/auth/presentation/auth_screens.dart';
+import 'package:sidecar/src/features/auth/presentation/pending_auth_destination.dart';
 import 'package:sidecar/src/features/diagnostics/presentation/config_diagnostics_screen.dart';
 import 'package:sidecar/src/features/navigation/presentation/main_tab_shell.dart';
 import 'package:sidecar/src/features/messaging/presentation/messaging_screens.dart';
@@ -85,6 +86,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (_, state) {
       final deepLink = sideCarDeepLinkDestination(state.uri);
       if (deepLink != null) return deepLink;
+      if (ref.read(authRepositoryProvider).currentUser == null &&
+          isGuestProtectedLocation(state.uri)) {
+        ref
+            .read(pendingAuthDestinationProvider.notifier)
+            .remember(state.uri.toString());
+        return AppRoutes.login;
+      }
       if (!isStripeReturnLocation(state.uri)) return null;
       return stripeReturnDestination(
         state.uri,
@@ -318,8 +326,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.rideDetails,
         parentNavigatorKey: _rootNavigatorKey,
-        builder: (_, state) =>
-            RideDetailsScreen(rideId: state.pathParameters['rideId'] ?? ''),
+        builder: (_, state) => RideDetailsScreen(
+          rideId: state.pathParameters['rideId'] ?? '',
+          resumeSeatRequest:
+              state.uri.queryParameters['resume'] == 'request-seat',
+          initialSeat: state.uri.queryParameters['seat'],
+        ),
       ),
     ],
   );
@@ -327,6 +339,33 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   ref.onDispose(router.dispose);
   return router;
 });
+
+bool isGuestProtectedLocation(Uri uri) {
+  final path = uri.path;
+  if (path == AppRoutes.action ||
+      path == AppRoutes.searchResults ||
+      path == AppRoutes.myRides ||
+      path == AppRoutes.messages ||
+      path == AppRoutes.account ||
+      path == AppRoutes.profile ||
+      path == AppRoutes.photoPermission ||
+      path == AppRoutes.onboarded ||
+      path == AppRoutes.profileGate ||
+      path == AppRoutes.verification ||
+      path == AppRoutes.identityVerification ||
+      path == AppRoutes.driverLicense ||
+      path == AppRoutes.vehicleProfile ||
+      path == AppRoutes.verificationComplete ||
+      path == AppRoutes.safetyTools ||
+      path == AppRoutes.blockUser ||
+      path == AppRoutes.reportUser ||
+      path == AppRoutes.changePassword ||
+      path == AppRoutes.deleteAccount ||
+      path == AppRoutes.publicProfile) {
+    return true;
+  }
+  return path.startsWith('/messages/') || path.startsWith('/profiles/');
+}
 
 bool isStripeReturnLocation(Uri uri) {
   if (uri.scheme == 'sidecar' && uri.host == 'stripe-redirect') return true;

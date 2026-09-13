@@ -1257,18 +1257,17 @@ export const searchRides = onCall(
 export const listLeavingSoon = onCall(
   {region, enforceAppCheck: true, maxInstances: 60},
   async (request) => {
-    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
-    await requireVerifiedUser(request.auth.uid);
+    if (request.auth) await requireVerifiedUser(request.auth.uid);
     const snapshot = await db.collection("rides")
       .where("status", "==", "published")
       .where("departureAt", ">=", Timestamp.now())
       .orderBy("departureAt")
       .limit(20)
       .get();
-    const blocked = await blockedDriverIds(
+    const blocked = request.auth ? await blockedDriverIds(
       request.auth.uid,
       snapshot.docs.map((document) => String(document.data().driverId ?? "")),
-    );
+    ) : new Set<string>();
     const rideDocuments = snapshot.docs
       .filter((document) => {
         const driverId = document.data().driverId;
@@ -1276,8 +1275,7 @@ export const listLeavingSoon = onCall(
           driverId !== request.auth?.uid &&
           !blocked.has(driverId) &&
           Number(document.data().seatsAvailable ?? 0) > 0;
-      })
-      .slice(0, 6);
+      });
     const rides = await publicRides(rideDocuments.map((document) => ({
       id: document.id,
       data: document.data(),
@@ -1289,14 +1287,20 @@ export const listLeavingSoon = onCall(
 export const getRide = onCall(
   {region, enforceAppCheck: true, maxInstances: 60},
   async (request) => {
-    if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
-    await requireVerifiedUser(request.auth.uid);
     const rideId = stringValue(object(request.data).rideId, "Ride", 128);
     const snapshot = await db.collection("rides").doc(rideId).get();
     const ride = snapshot.data();
     if (!ride) {
       throw new HttpsError("not-found", "That ride is no longer available.");
     }
+    if (!request.auth) {
+      if (ride.status !== "published") {
+        throw new HttpsError("not-found", "That ride is no longer available.");
+      }
+      const [publicResult] = await publicRides([{id: snapshot.id, data: ride}]);
+      return {ride: publicResult};
+    }
+    await requireVerifiedUser(request.auth.uid);
     let isParticipant = false;
     if (ride.driverId !== request.auth.uid && ride.status !== "published") {
       const participant = await db.collection("bookings")

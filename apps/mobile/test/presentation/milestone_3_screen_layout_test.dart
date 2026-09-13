@@ -232,6 +232,9 @@ void main() {
     await setPhoneSize(tester);
     final container = ProviderContainer(
       overrides: [
+        authRepositoryProvider.overrideWithValue(
+          const _RideOwnerAuthRepository(),
+        ),
         rideRepositoryProvider.overrideWithValue(_PlacesOnlyRepository()),
         profileRepositoryProvider.overrideWithValue(_ProfileRepository()),
       ],
@@ -264,6 +267,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          authRepositoryProvider.overrideWithValue(
+            const _RideOwnerAuthRepository(),
+          ),
           rideRepositoryProvider.overrideWithValue(_PlacesOnlyRepository()),
         ],
         child: MaterialApp(
@@ -512,6 +518,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          authRepositoryProvider.overrideWithValue(
+            const _RideOwnerAuthRepository(),
+          ),
           rideRepositoryProvider.overrideWithValue(_PlacesOnlyRepository()),
           profileRepositoryProvider.overrideWithValue(_ProfileRepository()),
         ],
@@ -531,6 +540,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          authRepositoryProvider.overrideWithValue(
+            const _RideOwnerAuthRepository(),
+          ),
           rideRepositoryProvider.overrideWithValue(_PlacesOnlyRepository()),
           profileRepositoryProvider.overrideWithValue(_ProfileRepository()),
         ],

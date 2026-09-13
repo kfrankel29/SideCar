@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/auth/presentation/guest_access.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/profile/presentation/account_profile_screen.dart';
@@ -15,6 +17,7 @@ import 'package:sidecar/src/features/messaging/domain/messaging_repository.dart'
 import 'package:sidecar/src/features/notifications/domain/notification_service.dart';
 import 'package:sidecar/src/features/rides/presentation/driver_ride_screens.dart';
 import 'package:sidecar/src/features/rides/presentation/ride_search_screens.dart';
+import 'package:sidecar/src/routing/app_router.dart';
 import 'package:sidecar/src/theme/app_theme.dart';
 
 class MainTabShell extends ConsumerWidget {
@@ -24,23 +27,30 @@ class MainTabShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final profile = ref.watch(currentProfileProvider).value;
-    final role = profile?.primaryRole;
-    if (role == null) {
+    final profileState = ref.watch(currentProfileProvider);
+    final profile = profileState.value;
+    final signedIn = _hasSignedInUser(ref);
+    if (signedIn && profileState.isLoading && !profileState.hasValue) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
+    final role = profile?.primaryRole ?? PrimaryRole.rider;
     final uid = profile?.userId ?? '';
-    final unreadMessages =
-        ref
-            .watch(conversationsProvider)
-            .value
-            ?.fold<int>(0, (total, item) => total + item.unreadCount(uid)) ??
-        0;
-    final pendingRequests = role == PrimaryRole.driver
+    final unreadMessages = signedIn
+        ? ref
+                  .watch(conversationsProvider)
+                  .value
+                  ?.fold<int>(
+                    0,
+                    (total, item) => total + item.unreadCount(uid),
+                  ) ??
+              0
+        : 0;
+    final pendingRequests = signedIn && role == PrimaryRole.driver
         ? ref.watch(driverPendingRequestCountProvider).value ?? 0
         : 0;
-    final unreadRideUpdates =
-        ref.watch(rideNotificationAttentionProvider).value ?? 0;
+    final unreadRideUpdates = signedIn
+        ? ref.watch(rideNotificationAttentionProvider).value ?? 0
+        : 0;
     return Scaffold(
       body: navigationShell,
       bottomNavigationBar: SafeArea(
@@ -52,8 +62,31 @@ class MainTabShell extends ConsumerWidget {
           pendingRequests: pendingRequests,
           unreadRideUpdates: unreadRideUpdates,
           selectedIndex: navigationShell.currentIndex,
-          onSelected: (index) {
+          onSelected: (index) async {
             AppHaptics.tap();
+            if (!signedIn && index != 0) {
+              final destinations = <String>[
+                AppRoutes.home,
+                AppRoutes.action,
+                AppRoutes.myRides,
+                AppRoutes.messages,
+                AppRoutes.account,
+              ];
+              final descriptions = <String>[
+                '',
+                'Create an account or log in to search for a route and request a seat.',
+                'Create an account or log in to view and manage your rides.',
+                'Create an account or log in to message drivers and riders.',
+                'Create an account or log in to manage your SideCar profile.',
+              ];
+              await requireSignedIn(
+                context,
+                ref,
+                destination: destinations[index],
+                message: descriptions[index],
+              );
+              return;
+            }
             if (role == PrimaryRole.driver && index == 2) {
               ref.invalidate(driverPendingRequestCountProvider);
             }
@@ -76,6 +109,14 @@ class MainTabShell extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+bool _hasSignedInUser(WidgetRef ref) {
+  try {
+    return ref.read(authRepositoryProvider).currentUser != null;
+  } on Object {
+    return false;
   }
 }
 

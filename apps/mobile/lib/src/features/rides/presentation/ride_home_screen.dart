@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/auth/presentation/guest_access.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
@@ -27,20 +29,33 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
   Future<List<SeatBooking>>? _bookings;
   Future<_ActiveRide?>? _activeRide;
   PrimaryRole? _loadedRole;
+  bool? _loadedAsGuest;
 
-  void _ensureLoad(PrimaryRole role, {bool forceRefresh = false}) {
-    if (!forceRefresh && _rides != null && _loadedRole == role) return;
+  void _ensureLoad(
+    PrimaryRole role, {
+    required bool isGuest,
+    bool forceRefresh = false,
+  }) {
+    if (!forceRefresh &&
+        _rides != null &&
+        _loadedRole == role &&
+        _loadedAsGuest == isGuest) {
+      return;
+    }
     _loadedRole = role;
+    _loadedAsGuest = isGuest;
     final repository = ref.read(rideRepositoryProvider);
-    _rides = role == PrimaryRole.driver
+    _rides = !isGuest && role == PrimaryRole.driver
         ? repository.listMyRides(forceRefresh: forceRefresh)
         : repository.listLeavingSoon(forceRefresh: forceRefresh);
-    _bookings = role == PrimaryRole.rider
+    _bookings = !isGuest && role == PrimaryRole.rider
         ? ref
               .read(bookingRepositoryProvider)
               .listMyBookings(forceRefresh: forceRefresh)
         : Future.value(const <SeatBooking>[]);
-    _activeRide = role == PrimaryRole.driver
+    _activeRide = isGuest
+        ? Future.value(null)
+        : role == PrimaryRole.driver
         ? _findDriverActiveRide(_rides!)
         : _findRiderActiveRide(_bookings!);
   }
@@ -166,17 +181,18 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
       });
     });
     final profileState = ref.watch(currentProfileProvider);
-    if (profileState.isLoading && !profileState.hasValue) {
+    final profile = profileState.value;
+    final signedIn = _hasSignedInUser(ref);
+    if (signedIn && profileState.isLoading && !profileState.hasValue) {
       return const RidePageScaffold(
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    final profile = profileState.value;
     final role = profile?.primaryRole ?? PrimaryRole.rider;
     final pendingRequests = role == PrimaryRole.driver
         ? ref.watch(driverPendingRequestCountProvider).value ?? 0
         : 0;
-    _ensureLoad(role);
+    _ensureLoad(role, isGuest: !signedIn);
     return RidePageScaffold(
       body: RefreshIndicator(
         onRefresh: () async {
@@ -185,7 +201,7 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
             _bookings = null;
             _activeRide = null;
           });
-          _ensureLoad(role, forceRefresh: true);
+          _ensureLoad(role, isGuest: !signedIn, forceRefresh: true);
           await Future.wait<Object?>([_rides!, _activeRide!]);
         },
         child: ListView(
@@ -195,7 +211,9 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    'Hey, ${profile?.firstName ?? 'there'}',
+                    signedIn
+                        ? 'Hey, ${profile?.firstName ?? 'there'}'
+                        : 'Find your ride',
                     style: const TextStyle(
                       fontFamily: 'Arial',
                       color: AppColors.ink,
@@ -210,7 +228,19 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
                   label: 'Open profile',
                   child: InkWell(
                     borderRadius: BorderRadius.circular(24),
-                    onTap: () => context.go(AppRoutes.account),
+                    onTap: () async {
+                      if (signedIn) {
+                        context.go(AppRoutes.account);
+                        return;
+                      }
+                      await requireSignedIn(
+                        context,
+                        ref,
+                        destination: AppRoutes.account,
+                        message:
+                            'Create an account or log in to manage your SideCar profile.',
+                      );
+                    },
                     child: RideAvatar(
                       initials: _initials(profile),
                       photoUrl: profile?.photoUrl ?? '',
@@ -238,6 +268,19 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
                 rides: _rides!,
                 bookings: _bookings!,
                 activeRide: _activeRide!,
+                onSearch: () async {
+                  if (signedIn) {
+                    context.go(AppRoutes.searchRides);
+                    return;
+                  }
+                  await requireSignedIn(
+                    context,
+                    ref,
+                    destination: AppRoutes.searchRides,
+                    message:
+                        'Create an account or log in to search routes and request a seat.',
+                  );
+                },
                 onRetry: () => setState(() {
                   _rides = null;
                   _bookings = null;
@@ -259,17 +302,27 @@ class _RideHomeScreenState extends ConsumerState<RideHomeScreen> {
   }
 }
 
+bool _hasSignedInUser(WidgetRef ref) {
+  try {
+    return ref.read(authRepositoryProvider).currentUser != null;
+  } on Object {
+    return false;
+  }
+}
+
 class _RiderHome extends StatelessWidget {
   const _RiderHome({
     required this.rides,
     required this.bookings,
     required this.activeRide,
+    required this.onSearch,
     required this.onRetry,
   });
 
   final Future<List<Ride>> rides;
   final Future<List<SeatBooking>> bookings;
   final Future<_ActiveRide?> activeRide;
+  final VoidCallback onSearch;
   final VoidCallback onRetry;
 
   @override
@@ -279,7 +332,7 @@ class _RiderHome extends StatelessWidget {
       children: [
         InkWell(
           borderRadius: BorderRadius.circular(11),
-          onTap: () => context.go(AppRoutes.searchRides),
+          onTap: onSearch,
           child: Container(
             height: 52,
             padding: const EdgeInsets.symmetric(horizontal: 16),

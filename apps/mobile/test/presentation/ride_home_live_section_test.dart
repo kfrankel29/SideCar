@@ -3,6 +3,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sidecar/src/features/auth/data/firebase_auth_repository.dart';
+import 'package:sidecar/src/features/auth/domain/account_user.dart';
+import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/core/errors/app_failure.dart';
@@ -93,6 +96,9 @@ Future<void> _pumpHome(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        authRepositoryProvider.overrideWithValue(
+          const _SignedInAuthRepository(),
+        ),
         profileRepositoryProvider.overrideWithValue(_ProfileRepository(role)),
         rideRepositoryProvider.overrideWithValue(
           rideRepository ?? _RideRepository(),
@@ -105,6 +111,22 @@ Future<void> _pumpHome(
     ),
   );
   await tester.pumpAndSettle();
+}
+
+class _SignedInAuthRepository extends UnavailableAuthRepository {
+  const _SignedInAuthRepository();
+
+  static const _user = AccountUser(
+    id: 'driver',
+    email: 'driver@ucsb.edu',
+    emailVerified: true,
+  );
+
+  @override
+  AccountUser get currentUser => _user;
+
+  @override
+  Stream<AccountUser?> authStateChanges() => Stream.value(_user);
 }
 
 class _RideRepository extends UnavailableRideRepository {

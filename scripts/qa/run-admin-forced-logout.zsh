@@ -3,6 +3,7 @@ set -euo pipefail
 
 device="${1:?simulator device id is required}"
 admin_fixture="${SIDECAR_M6_FIXTURE_PATH:-/tmp/sidecar-m6-acceptance.json}"
+feedback_fixture="${SIDECAR_FEEDBACK_FIXTURE_PATH:-/tmp/sidecar-feedback-acceptance.json}"
 flutter_bin="${SIDECAR_FLUTTER_BIN:-flutter}"
 firebase_config="${SIDECAR_FIREBASE_CONFIG:?SIDECAR_FIREBASE_CONFIG is required}"
 
@@ -25,6 +26,13 @@ while IFS=$'\t' read -r key value; do
       ;;
   esac
 done < <(/usr/bin/jq -r 'to_entries[] | [.key, .value] | @tsv' "$admin_fixture")
+
+if [[ -f "$feedback_fixture" ]]; then
+  app_check_token="$(jq -r '.SIDECAR_APP_CHECK_DEBUG_TOKEN // empty' "$feedback_fixture")"
+  if [[ -n "$app_check_token" ]]; then
+    define_args+=("--dart-define=SIDECAR_APP_CHECK_DEBUG_TOKEN=${app_check_token}")
+  fi
+fi
 
 MAPS_API_KEY="$maps_api_key" "$flutter_bin" test \
   --no-pub \

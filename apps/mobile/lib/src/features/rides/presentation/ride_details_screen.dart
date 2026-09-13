@@ -6,6 +6,7 @@ import 'package:sidecar/src/core/errors/app_failure.dart';
 import 'package:sidecar/src/core/platform/app_haptics.dart';
 import 'package:sidecar/src/core/widgets/app_notice.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/auth/presentation/guest_access.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_models.dart';
 import 'package:sidecar/src/features/bookings/domain/booking_repository.dart';
 import 'package:sidecar/src/features/bookings/presentation/payment_screens.dart';
@@ -33,9 +34,16 @@ String _rideShareText(Ride ride) => [
 ].join('\n');
 
 class RideDetailsScreen extends ConsumerStatefulWidget {
-  const RideDetailsScreen({required this.rideId, super.key});
+  const RideDetailsScreen({
+    required this.rideId,
+    this.resumeSeatRequest = false,
+    this.initialSeat,
+    super.key,
+  });
 
   final String rideId;
+  final bool resumeSeatRequest;
+  final String? initialSeat;
 
   @override
   ConsumerState<RideDetailsScreen> createState() => _RideDetailsScreenState();
@@ -45,10 +53,14 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
   late Future<_RideDetailsPayload> _details;
   bool _requesting = false;
   BookingSeat _selectedSeat = BookingSeat.front;
+  bool _resumeHandled = false;
 
   @override
   void initState() {
     super.initState();
+    for (final seat in BookingSeat.values) {
+      if (seat.name == widget.initialSeat) _selectedSeat = seat;
+    }
     _load();
   }
 
@@ -110,6 +122,21 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
   }
 
   Future<void> _requestSeat(Ride ride) async {
+    if (ref.read(authRepositoryProvider).currentUser == null) {
+      final destination = Uri(
+        path: '/rides/${widget.rideId}',
+        queryParameters: {'resume': 'request-seat', 'seat': _selectedSeat.name},
+      ).toString();
+      await requireSignedIn(
+        context,
+        ref,
+        destination: destination,
+        title: 'Request this seat',
+        message:
+            'Create an account or log in to finish your seat request. This ride will stay selected.',
+      );
+      return;
+    }
     final request = await showModalBottomSheet<SeatRequest>(
       context: context,
       isScrollControlled: true,
@@ -131,6 +158,33 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
     } finally {
       if (mounted) setState(() => _requesting = false);
     }
+  }
+
+  Future<void> _openDriverProfile(Ride ride) async {
+    if (ref.read(authRepositoryProvider).currentUser == null) {
+      await requireSignedIn(
+        context,
+        ref,
+        destination: '/profiles/${ride.driverId}',
+        message:
+            'Create an account or log in to view driver profiles and connect with the SideCar community.',
+      );
+      return;
+    }
+    if (mounted) context.push('/profiles/${ride.driverId}');
+  }
+
+  void _resumeSeatRequestOnce(Ride ride, SeatBooking? booking) {
+    if (!widget.resumeSeatRequest ||
+        _resumeHandled ||
+        booking != null ||
+        ref.read(authRepositoryProvider).currentUser == null) {
+      return;
+    }
+    _resumeHandled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _requestSeat(ride);
+    });
   }
 
   @override
@@ -170,10 +224,12 @@ class _RideDetailsScreenState extends ConsumerState<RideDetailsScreen> {
           final ride = details.ride;
           final isOwner =
               ref.read(authRepositoryProvider).currentUser?.id == ride.driverId;
+          if (!isOwner) _resumeSeatRequestOnce(ride, details.booking);
           return _RideDetails(
             ride: ride,
             isOwner: isOwner,
             onCancel: () => _cancelRide(ride),
+            onDriverProfile: () => _openDriverProfile(ride),
             requesting: _requesting,
             onRequest: () => _requestSeat(ride),
             selectedSeat: _selectedSeat,
@@ -198,6 +254,7 @@ class _RideDetails extends StatelessWidget {
     required this.ride,
     required this.isOwner,
     required this.onCancel,
+    required this.onDriverProfile,
     required this.requesting,
     required this.onRequest,
     required this.selectedSeat,
@@ -208,6 +265,7 @@ class _RideDetails extends StatelessWidget {
   final Ride ride;
   final bool isOwner;
   final VoidCallback onCancel;
+  final VoidCallback onDriverProfile;
   final bool requesting;
   final VoidCallback onRequest;
   final BookingSeat selectedSeat;
@@ -263,7 +321,7 @@ class _RideDetails extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     InkWell(
-                      onTap: () => context.push('/profiles/${ride.driverId}'),
+                      onTap: onDriverProfile,
                       borderRadius: BorderRadius.circular(12),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 2),

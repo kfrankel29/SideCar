@@ -110,7 +110,7 @@ class _AccountProfileScreenState extends ConsumerState<AccountProfileScreen>
     await ref.read(authRepositoryProvider).signOut();
     ref.invalidate(currentProfileProvider);
     ref.invalidate(currentVerificationProvider);
-    if (mounted) context.go(AppRoutes.welcome);
+    if (mounted) context.go(AppRoutes.home);
   }
 
   Future<void> _contactSupport() async {

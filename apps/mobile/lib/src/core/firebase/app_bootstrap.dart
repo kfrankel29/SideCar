@@ -83,22 +83,24 @@ class AppBootstrap {
       );
       Object? appCheckError;
       try {
-        await FirebaseAppCheck.instance.activate(
-          providerAndroid: kReleaseMode
-              ? const AndroidPlayIntegrityProvider()
-              : AndroidDebugProvider(
-                  debugToken: _appCheckDebugToken.isEmpty
-                      ? null
-                      : _appCheckDebugToken,
-                ),
-          providerApple: kReleaseMode
-              ? const AppleAppAttestWithDeviceCheckFallbackProvider()
-              : AppleDebugProvider(
-                  debugToken: _appCheckDebugToken.isEmpty
-                      ? null
-                      : _appCheckDebugToken,
-                ),
-        );
+        await FirebaseAppCheck.instance
+            .activate(
+              providerAndroid: kReleaseMode
+                  ? const AndroidPlayIntegrityProvider()
+                  : AndroidDebugProvider(
+                      debugToken: _appCheckDebugToken.isEmpty
+                          ? null
+                          : _appCheckDebugToken,
+                    ),
+              providerApple: kReleaseMode
+                  ? const AppleAppAttestWithDeviceCheckFallbackProvider()
+                  : AppleDebugProvider(
+                      debugToken: _appCheckDebugToken.isEmpty
+                          ? null
+                          : _appCheckDebugToken,
+                    ),
+            )
+            .timeout(const Duration(seconds: 8));
       } on Object catch (error) {
         appCheckError = error;
         debugPrint('Firebase App Check activation failed: $error');

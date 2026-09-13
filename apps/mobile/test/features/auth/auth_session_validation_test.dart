@@ -8,6 +8,7 @@ import 'package:sidecar/src/app.dart';
 import 'package:sidecar/src/core/config/business_config_repository.dart';
 import 'package:sidecar/src/features/auth/domain/account_user.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/notifications/domain/notification_service.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
@@ -52,8 +53,29 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(auth.validationCount, 1);
-    expect(find.text('Create account'), findsOneWidget);
-    expect(find.text('For students. By students.'), findsOneWidget);
+    expect(find.text('Find your ride'), findsOneWidget);
+    expect(find.text('No rides leaving soon'), findsOneWidget);
+  });
+
+  testWidgets('guest launch does not initialize protected notifications', (
+    tester,
+  ) async {
+    final auth = _SessionAuthRepository(currentUser: null, validatedUser: null);
+    final notifications = _RecordingNotificationService();
+
+    await tester.pumpWidget(
+      _testApp(
+        auth,
+        _MemoryProfileRepository(null),
+        notifications: notifications,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Find your ride'), findsOneWidget);
+    expect(notifications.initializeCount, 0);
+    expect(notifications.refreshCount, 0);
   });
 
   testWidgets('a missing server profile signs out a restored auth session', (
@@ -69,7 +91,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(auth.signOutCount, 1);
-    expect(find.text('Create account'), findsOneWidget);
+    expect(find.text('Find your ride'), findsOneWidget);
   });
 
   testWidgets('an incomplete server profile continues profile setup', (
@@ -150,7 +172,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(auth.signOutCount, 1);
-    expect(find.text('Create account'), findsOneWidget);
+    expect(find.text('Find your ride'), findsOneWidget);
   });
 
   testWidgets('choosing a role persists it and leaves role onboarding', (
@@ -198,7 +220,7 @@ void main() {
 
     expect(auth.validationCount, 2);
     expect(auth.signOutCount, 1);
-    expect(find.text('Create account'), findsOneWidget);
+    expect(find.text('Find your ride'), findsOneWidget);
   });
 
   testWidgets('admin deletion ends an active app session immediately', (
@@ -230,12 +252,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(auth.signOutCount, 1);
-    expect(find.text('Create account'), findsOneWidget);
+    expect(find.text('Find your ride'), findsOneWidget);
     await profiles.dispose();
   });
 }
 
-Widget _testApp(AuthRepository auth, ProfileRepository profiles) {
+Widget _testApp(
+  AuthRepository auth,
+  ProfileRepository profiles, {
+  NotificationService notifications = const UnavailableNotificationService(),
+}) {
   return ProviderScope(
     overrides: [
       businessConfigRepositoryProvider.overrideWithValue(
@@ -247,9 +273,37 @@ Widget _testApp(AuthRepository auth, ProfileRepository profiles) {
       verificationRepositoryProvider.overrideWithValue(
         const _MemoryVerificationRepository(),
       ),
+      notificationServiceProvider.overrideWithValue(notifications),
     ],
     child: const SideCarApp(),
   );
+}
+
+class _RecordingNotificationService implements NotificationService {
+  int initializeCount = 0;
+  int refreshCount = 0;
+
+  @override
+  Stream<NotificationAction> get actions => const Stream.empty();
+
+  @override
+  Stream<NotificationAction> get updates => const Stream.empty();
+
+  @override
+  Future<void> initialize() async {
+    initializeCount += 1;
+  }
+
+  @override
+  Future<void> refreshRegistration() async {
+    refreshCount += 1;
+  }
+
+  @override
+  Future<int> unreadRideUpdateCount() async => 0;
+
+  @override
+  Future<void> markRideUpdatesRead() async {}
 }
 
 class _EmptyRideRepository implements RideRepository {
@@ -358,22 +412,24 @@ class _MemoryVerificationRepository implements VerificationRepository {
 
 class _SessionAuthRepository implements AuthRepository {
   _SessionAuthRepository({
-    required this.currentUser,
+    required AccountUser? currentUser,
     required this.validatedUser,
-  });
+  }) : _currentUser = currentUser;
 
   @override
-  final AccountUser? currentUser;
+  AccountUser? get currentUser => _currentUser;
+  AccountUser? _currentUser;
   AccountUser? validatedUser;
   int validationCount = 0;
   int signOutCount = 0;
 
   @override
-  Stream<AccountUser?> authStateChanges() => Stream.value(currentUser);
+  Stream<AccountUser?> authStateChanges() => Stream.value(_currentUser);
 
   @override
   Future<AccountUser?> validateCurrentSession() async {
     validationCount += 1;
+    if (validatedUser == null) _currentUser = null;
     return validatedUser;
   }
 
@@ -416,6 +472,7 @@ class _SessionAuthRepository implements AuthRepository {
   @override
   Future<void> signOut() async {
     signOutCount += 1;
+    _currentUser = null;
   }
 
   @override

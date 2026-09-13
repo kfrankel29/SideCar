@@ -31,7 +31,9 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    scheduleMicrotask(_initializeNotifications);
+    if (ref.read(authRepositoryProvider).currentUser != null) {
+      scheduleMicrotask(_initializeNotifications);
+    }
   }
 
   @override
@@ -96,9 +98,11 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
         if (_wasBackgrounded) {
           _wasBackgrounded = false;
           _refreshNotificationState();
-          unawaited(
-            ref.read(notificationServiceProvider).refreshRegistration(),
-          );
+          if (ref.read(authRepositoryProvider).currentUser != null) {
+            unawaited(
+              ref.read(notificationServiceProvider).refreshRegistration(),
+            );
+          }
           unawaited(_validateRestoredSession());
         }
     }
@@ -116,7 +120,7 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
           .read(authRepositoryProvider)
           .validateCurrentSession();
       if (user == null) {
-        _resetToWelcome();
+        _resetToHome();
         return;
       }
       final profile = await ref
@@ -124,7 +128,7 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
           .loadCurrentProfile();
       if (profile == null) {
         await ref.read(authRepositoryProvider).signOut();
-        _resetToWelcome();
+        _resetToHome();
       }
     } on Object {
       return;
@@ -133,8 +137,8 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
     }
   }
 
-  void _resetToWelcome() {
-    if (mounted) ref.read(appRouterProvider).go(AppRoutes.welcome);
+  void _resetToHome() {
+    if (mounted) ref.read(appRouterProvider).go(AppRoutes.home);
   }
 
   Future<void> _endRevokedSession() async {
@@ -145,7 +149,7 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
     } on Object {
       // The server may already have removed the Firebase Auth account.
     } finally {
-      _resetToWelcome();
+      _resetToHome();
       _isEndingRevokedSession = false;
     }
   }
@@ -156,7 +160,10 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
       if (next.value?.isDeleted == true) unawaited(_endRevokedSession());
     });
     ref.listen(authStateProvider, (previous, next) {
-      if (previous?.value != null && next.value == null) _resetToWelcome();
+      if (previous?.value != null && next.value == null) _resetToHome();
+      if (previous?.value == null && next.value != null) {
+        unawaited(_initializeNotifications());
+      }
     });
     final router = ref.watch(appRouterProvider);
 

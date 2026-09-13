@@ -43,10 +43,10 @@ class FirebaseAuthRepository implements AuthRepository {
     if (user == null) return null;
 
     try {
-      await user.reload();
+      await user.reload().timeout(const Duration(seconds: 8));
       final refreshedUser = _auth.currentUser;
       if (refreshedUser == null) return null;
-      await refreshedUser.getIdToken(true);
+      await refreshedUser.getIdToken(true).timeout(const Duration(seconds: 8));
       return _mapUser(refreshedUser);
     } on Object {
       try {

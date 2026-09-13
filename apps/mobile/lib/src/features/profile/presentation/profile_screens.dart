@@ -11,6 +11,7 @@ import 'package:sidecar/src/core/platform/app_haptics.dart';
 import 'package:sidecar/src/core/widgets/device_settings.dart';
 import 'package:sidecar/src/core/widgets/sidecar_scaffold.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/auth/presentation/guest_access.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/verification/domain/verification_repository.dart';
@@ -78,7 +79,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       return;
     }
     await ref.read(authRepositoryProvider).signOut();
-    if (mounted) context.go(AppRoutes.welcome);
+    if (mounted) context.go(AppRoutes.home);
   }
 
   Future<void> _choosePhoto() async {
@@ -588,7 +589,7 @@ class OnboardedScreen extends ConsumerWidget {
       if (!context.mounted) return;
       context.go(
         verification.canUseRideFeatures(role)
-            ? AppRoutes.home
+            ? takePendingAuthDestination(ref)
             : AppRoutes.verification,
       );
     } on AppFailure catch (error) {
@@ -754,7 +755,7 @@ class ProfileGateScreen extends ConsumerWidget {
               child: TextButton(
                 onPressed: AppHaptics.wrap(() async {
                   await ref.read(authRepositoryProvider).signOut();
-                  if (context.mounted) context.go(AppRoutes.welcome);
+                  if (context.mounted) context.go(AppRoutes.home);
                 }),
                 child: const Text('Log out'),
               ),

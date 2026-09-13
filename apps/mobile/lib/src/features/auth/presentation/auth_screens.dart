@@ -11,6 +11,7 @@ import 'package:sidecar/src/core/platform/app_haptics.dart';
 import 'package:sidecar/src/core/widgets/sidecar_scaffold.dart';
 import 'package:sidecar/src/core/widgets/password_field.dart';
 import 'package:sidecar/src/features/auth/domain/auth_repository.dart';
+import 'package:sidecar/src/features/auth/presentation/guest_access.dart';
 import 'package:sidecar/src/features/profile/domain/profile_repository.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/session/domain/app_flow_state.dart';
@@ -60,6 +61,11 @@ Future<String> _routeForProfile(WidgetRef ref, UserProfile profile) async {
   return _routeForAppFlow(profile, verification);
 }
 
+String _routeAfterAuthentication(WidgetRef ref, String route) {
+  if (route != AppRoutes.home) return route;
+  return takePendingAuthDestination(ref);
+}
+
 class OpeningScreen extends ConsumerStatefulWidget {
   const OpeningScreen({super.key, this.autoContinue = true});
 
@@ -83,12 +89,17 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
     await Future<void>.delayed(const Duration(milliseconds: 1100));
     if (!mounted) return;
 
+    final authRepository = ref.read(authRepositoryProvider);
+    if (authRepository.currentUser == null) {
+      context.go(AppRoutes.home);
+      return;
+    }
+
     try {
-      final authRepository = ref.read(authRepositoryProvider);
       final user = await authRepository.validateCurrentSession();
       if (!mounted) return;
       if (user == null) {
-        context.go(AppRoutes.welcome);
+        context.go(AppRoutes.home);
         return;
       }
       final profile = await ref
@@ -97,7 +108,7 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
       if (!mounted) return;
       if (profile == null) {
         await authRepository.signOut();
-        if (mounted) context.go(AppRoutes.welcome);
+        if (mounted) context.go(AppRoutes.home);
         return;
       }
       if (!user.emailVerified) {
@@ -114,12 +125,7 @@ class _OpeningScreenState extends ConsumerState<OpeningScreen> {
       if (!mounted) return;
       context.go(_routeForAppFlow(profile, verification));
     } on Object {
-      if (mounted) {
-        setState(
-          () => _error =
-              'We could not refresh your account. Check your connection and try again.',
-        );
-      }
+      if (mounted) context.go(AppRoutes.home);
     }
   }
 
@@ -286,11 +292,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       if (profile == null) {
         await ref.read(authRepositoryProvider).signOut();
-        if (mounted) context.go(AppRoutes.welcome);
+        if (mounted) context.go(AppRoutes.home);
         return;
       }
       final route = await _routeForProfile(ref, profile);
-      if (mounted) context.go(route);
+      if (mounted) context.go(_routeAfterAuthentication(ref, route));
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
@@ -315,11 +321,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       if (profile == null) {
         await ref.read(authRepositoryProvider).signOut();
-        if (mounted) context.go(AppRoutes.welcome);
+        if (mounted) context.go(AppRoutes.home);
         return;
       }
       final route = await _routeForProfile(ref, profile);
-      if (mounted) context.go(route);
+      if (mounted) context.go(_routeAfterAuthentication(ref, route));
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } finally {
@@ -331,7 +337,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
-      onBack: () => _popOrGo(context, AppRoutes.welcome),
+      onBack: () => _popOrGo(context, AppRoutes.home),
       fillViewport: true,
       child: Form(
         key: _formKey,
@@ -480,11 +486,11 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
       if (!mounted) return;
       if (profile == null) {
         await ref.read(authRepositoryProvider).signOut();
-        if (mounted) context.go(AppRoutes.welcome);
+        if (mounted) context.go(AppRoutes.home);
         return;
       }
       final route = await _routeForProfile(ref, profile);
-      if (mounted) context.go(route);
+      if (mounted) context.go(_routeAfterAuthentication(ref, route));
     } on AppFailure catch (error) {
       if (mounted) setState(() => _error = error.message);
     } on Object {
@@ -502,7 +508,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
   Widget build(BuildContext context) {
     return SideCarScaffold(
       showBack: true,
-      onBack: () => _popOrGo(context, AppRoutes.welcome),
+      onBack: () => _popOrGo(context, AppRoutes.home),
       child: Form(
         key: _formKey,
         child: Column(
@@ -800,7 +806,7 @@ class _EmailVerificationScreenState
       onBack: () async {
         await ref.read(authRepositoryProvider).signOut();
         if (!context.mounted) return;
-        _popOrGo(context, AppRoutes.welcome);
+        _popOrGo(context, AppRoutes.home);
       },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
