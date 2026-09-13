@@ -43,7 +43,9 @@ class _DeleteAccountScreenState extends ConsumerState<DeleteAccountScreen> {
             confirmation: _controller.text.trim(),
             currentPassword: _passwordController.text,
           );
-      if (mounted) context.go(AppRoutes.welcome);
+      // The global session gate owns navigation after the backend removes the
+      // account. Navigating from this disposed route races Firebase Auth and
+      // previously produced a stale "link is no longer available" screen.
     } on AppFailure catch (error) {
       if (mounted) {
         showAppNotice(context, error.message, kind: AppNoticeKind.error);

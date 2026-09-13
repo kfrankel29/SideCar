@@ -308,6 +308,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                           value: 'Non-binary',
                           child: Text('Non-binary'),
                         ),
+                        DropdownMenuItem(value: 'Other', child: Text('Other')),
                         DropdownMenuItem(
                           value: 'Prefer not to say',
                           child: Text('Prefer not to say'),

@@ -71,7 +71,6 @@ service cloud.firestore {
           request.resource.data.licensePlate.size() > 0 &&
           request.resource.data.licensePlate.size() <= 20 &&
           request.resource.data.photoUrl is string &&
-          request.resource.data.photoUrl.size() > 0 &&
           request.resource.data.photoUrl.size() <= 2048 &&
           request.resource.data.complete == true;
         allow delete: if owns(uid);

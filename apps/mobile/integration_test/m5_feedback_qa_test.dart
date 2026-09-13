@@ -178,30 +178,30 @@ void main() {
       await tester.pumpAndSettle();
       expect(mapFinder, findsOneWidget);
       var updatedMap = tester.widget<GoogleMap>(mapFinder);
-      expect(updatedMap.markers, hasLength(7));
+      expect(updatedMap.markers, hasLength(8));
       expect(
         updatedMap.markers.any(
           (marker) => marker.markerId.value.contains('search-0-san-jose'),
         ),
         isTrue,
       );
-      expect(find.text('Show gas stations'), findsOneWidget);
-      expect(find.text('Feedback Test Gas'), findsNothing);
-
-      await tester.tap(find.text('Show gas stations'));
-      await tester.pumpAndSettle();
       expect(repository.requestedGasStations, isTrue);
       expect(repository.gasStationRequestCount, 1);
-      expect(repository.gasStationQuery, 'San Jose Airport');
+      expect(repository.gasStationQuery, isEmpty);
+      expect(find.text('Center saved gas stations'), findsOneWidget);
       updatedMap = tester.widget<GoogleMap>(mapFinder);
-      expect(updatedMap.markers, hasLength(11));
+      expect(updatedMap.markers, hasLength(8));
       await tester.drag(find.byType(ListView), const Offset(0, -450));
       await tester.pumpAndSettle();
-      expect(find.text('Gas stations near San Jose Airport'), findsOneWidget);
+      expect(
+        find.text('Closest gas stations to San Jose Airport'),
+        findsOneWidget,
+      );
       expect(find.text('Feedback Test Gas'), findsOneWidget);
       expect(find.text('Second Test Gas'), findsOneWidget);
       expect(find.text('Third Test Gas'), findsOneWidget);
       expect(find.text('Hidden Test Gas'), findsNothing);
+      expect(find.text('Closest'), findsOneWidget);
       if (visualPauseMs > 0) {
         debugPrint('M5_FEEDBACK_VISUAL_PAUSE=$visualPauseMs');
         await Future<void>.delayed(Duration(milliseconds: visualPauseMs));
@@ -244,34 +244,17 @@ void main() {
       var sanMateoMap = tester.widget<GoogleMap>(mapFinder);
       expect(
         sanMateoMap.markers.any(
-          (marker) => marker.markerId.value.contains('gas-san-mateo'),
-        ),
-        isFalse,
-      );
-      expect(find.text('Show gas stations'), findsOneWidget);
-
-      await tester.tap(find.text('Show gas stations'));
-      await tester.pumpAndSettle();
-      expect(
-        repository.gasStationRequestCount,
-        gasRequestsBeforeSecondSearch + 1,
-      );
-      expect(repository.gasStationQuery, 'San Mateo');
-      sanMateoMap = tester.widget<GoogleMap>(mapFinder);
-      expect(
-        sanMateoMap.markers.any(
-          (marker) => marker.markerId.value.contains('gas-san-mateo'),
+          (marker) => marker.markerId.value.contains('gas-feedback'),
         ),
         isTrue,
       );
       expect(
-        sanMateoMap.markers.any(
-          (marker) => marker.markerId.value.contains('gas-feedback'),
-        ),
-        isFalse,
+        repository.gasStationRequestCount,
+        gasRequestsBeforeSecondSearch + 1,
       );
-      expect(find.text('Gas stations near San Mateo'), findsOneWidget);
-      expect(find.text('San Mateo Route Gas'), findsOneWidget);
+      expect(repository.gasStationQuery, isEmpty);
+      expect(find.text('Closest gas stations to San Mateo'), findsOneWidget);
+      expect(find.text('Feedback Test Gas'), findsOneWidget);
 
       updatedMap.onTap?.call(const LatLng(37.335, -121.89));
       await tester.pumpAndSettle();
@@ -395,54 +378,43 @@ class _RouteRepository extends UnavailableRideRepository {
       mapWidth: 640,
       mapHeight: 352,
       gasStations: includeGasStations
-          ? gasStationQuery.toLowerCase().contains('san mateo')
-                ? const [
-                    RidePlacePrediction(
-                      placeId: 'gas-san-mateo',
-                      displayName: 'San Mateo Route Gas, San Mateo, CA',
-                      mainText: 'San Mateo Route Gas',
-                      secondaryText: 'San Mateo, CA · 0.4 mi from route',
-                      latitude: 37.5630,
-                      longitude: -122.3255,
-                    ),
-                  ]
-                : const [
-                    RidePlacePrediction(
-                      placeId: 'gas-feedback',
-                      displayName: 'Feedback Test Gas, San Jose, CA',
-                      mainText: 'Feedback Test Gas',
-                      secondaryText: 'San Jose, CA · 0.3 mi from route',
-                      latitude: 37.3385,
-                      longitude: -121.8870,
-                    ),
-                    RidePlacePrediction(
-                      placeId: 'gas-2',
-                      displayName: 'Second Test Gas, San Jose, CA',
-                      mainText: 'Second Test Gas',
-                      secondaryText: 'San Jose, CA · 0.4 mi from route',
-                      latitude: 37.3390,
-                      longitude: -121.8860,
-                    ),
-                    RidePlacePrediction(
-                      placeId: 'gas-3',
-                      displayName: 'Third Test Gas, San Jose, CA',
-                      mainText: 'Third Test Gas',
-                      secondaryText: 'San Jose, CA · 0.5 mi from route',
-                      latitude: 37.3370,
-                      longitude: -121.8850,
-                    ),
-                    RidePlacePrediction(
-                      placeId: 'gas-4',
-                      displayName: 'Hidden Test Gas, San Jose, CA',
-                      mainText: 'Hidden Test Gas',
-                      secondaryText: 'San Jose, CA · 0.8 mi from route',
-                      latitude: 37.3360,
-                      longitude: -121.8840,
-                    ),
-                  ]
+          ? const [
+              RidePlacePrediction(
+                placeId: 'gas-feedback',
+                displayName: 'Feedback Test Gas, San Jose, CA',
+                mainText: 'Feedback Test Gas',
+                secondaryText: 'San Jose, CA · 0.3 mi from route',
+                latitude: 37.3385,
+                longitude: -121.8870,
+              ),
+              RidePlacePrediction(
+                placeId: 'gas-2',
+                displayName: 'Second Test Gas, San Jose, CA',
+                mainText: 'Second Test Gas',
+                secondaryText: 'San Jose, CA · 0.4 mi from route',
+                latitude: 37.3390,
+                longitude: -121.8860,
+              ),
+              RidePlacePrediction(
+                placeId: 'gas-3',
+                displayName: 'Third Test Gas, San Jose, CA',
+                mainText: 'Third Test Gas',
+                secondaryText: 'San Jose, CA · 0.5 mi from route',
+                latitude: 37.3370,
+                longitude: -121.8850,
+              ),
+              RidePlacePrediction(
+                placeId: 'gas-4',
+                displayName: 'Hidden Test Gas, San Jose, CA',
+                mainText: 'Hidden Test Gas',
+                secondaryText: 'San Jose, CA · 0.8 mi from route',
+                latitude: 37.3360,
+                longitude: -121.8700,
+              ),
+            ]
           : const [],
       searchResults: [..._sanJoseSearchPlaces, ..._sanMateoSearchPlaces]
-          .where((place) => searchPlaceIds.contains(place.placeId))
+          .where((place) => place.placeId == selectedPlaceId)
           .toList(growable: false),
     );
   }

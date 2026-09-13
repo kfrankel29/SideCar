@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -198,6 +199,39 @@ void main() {
     expect(auth.validationCount, 2);
     expect(auth.signOutCount, 1);
     expect(find.text('Create account'), findsOneWidget);
+  });
+
+  testWidgets('admin deletion ends an active app session immediately', (
+    tester,
+  ) async {
+    final auth = _SessionAuthRepository(
+      currentUser: restoredUser,
+      validatedUser: restoredUser,
+    );
+    final profiles = _LiveProfileRepository(
+      completeProfile.copyWith(primaryRole: PrimaryRole.rider),
+    );
+
+    await tester.pumpWidget(_testApp(auth, profiles));
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.pumpAndSettle();
+    expect(find.text('Hey, Test'), findsOneWidget);
+
+    profiles.emit(
+      UserProfile(
+        userId: restoredUser.id,
+        firstName: 'Deleted',
+        lastName: 'member',
+        school: 'UC Santa Barbara',
+        photoUrl: '',
+        accountStatus: 'deleted',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(auth.signOutCount, 1);
+    expect(find.text('Create account'), findsOneWidget);
+    await profiles.dispose();
   });
 }
 
@@ -420,4 +454,43 @@ class _MemoryProfileRepository implements ProfileRepository {
 
   @override
   Stream<UserProfile?> watchCurrentProfile() => Stream.value(profile);
+}
+
+class _LiveProfileRepository implements ProfileRepository {
+  _LiveProfileRepository(this.profile);
+
+  UserProfile? profile;
+  final StreamController<UserProfile?> _controller =
+      StreamController<UserProfile?>.broadcast();
+
+  void emit(UserProfile? value) {
+    profile = value;
+    _controller.add(value);
+  }
+
+  Future<void> dispose() => _controller.close();
+
+  @override
+  Future<UserProfile?> loadCurrentProfile() async => profile;
+
+  @override
+  Future<void> saveProfile(UserProfile profile) async => emit(profile);
+
+  @override
+  Future<void> setPrimaryRole(PrimaryRole role) async {
+    final current = profile;
+    if (current != null) emit(current.copyWith(primaryRole: role));
+  }
+
+  @override
+  Future<String> uploadProfilePhoto({
+    required Uint8List bytes,
+    required String contentType,
+  }) async => 'https://example.com/profile.jpg';
+
+  @override
+  Stream<UserProfile?> watchCurrentProfile() async* {
+    yield profile;
+    yield* _controller.stream;
+  }
 }

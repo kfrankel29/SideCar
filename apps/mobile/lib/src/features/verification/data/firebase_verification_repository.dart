@@ -145,10 +145,7 @@ class FirebaseVerificationRepository implements VerificationRepository {
     }
     try {
       await _vehicleReference
-          .set({
-            ...vehicle.toJson(),
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true))
+          .set({...vehicle.toJson(), 'updatedAt': FieldValue.serverTimestamp()})
           .timeout(_timeout);
     } on TimeoutException {
       throw const AppFailure(

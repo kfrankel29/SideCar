@@ -20,11 +20,11 @@ import {
   PolygonRing,
   decodeGooglePolyline,
   gasStationMatchesRoute,
-  pointMatchesRouteAndSearchArea,
   proximityToRoute,
   routePointAllowed,
   routeSearchMatch,
   searchRadiusMilesForPlace,
+  storedGasStationsForRider,
 } from "./ride_routing.js";
 import {weeklyDepartures} from "./ride_recurrence.js";
 import {compareClosestDepartures} from "./ride_search.js";
@@ -57,7 +57,6 @@ const region = "us-central1";
 const maxSearchResults = 100;
 const remoteTemplateCache = new AsyncTtlCache<RemoteConfigTemplate>(60_000);
 const gasStationCaches = new Map<string, AsyncTtlCache<PlaceDetails[]>>();
-const gasStationSearchCaches = new Map<string, AsyncTtlCache<PlaceDetails[]>>();
 
 type Json = Record<string, unknown>;
 
@@ -338,34 +337,33 @@ async function gasStationsAlongRoute(
   return cache.get(async () => {
     const route = decodeGooglePolyline(encodedPolyline);
     if (route.length < 2) return [];
-    const sampleCount = Math.min(8, route.length);
-    const samples = Array.from({length: sampleCount}, (_, index) =>
-      route[Math.round(index * (route.length - 1) / Math.max(1, sampleCount - 1))]!,
-    );
-    const responses = await Promise.allSettled(samples.map((point) => jsonResponse(
-      "https://places.googleapis.com/v1/places:searchNearby",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": googleMapsApiKey.value(),
-          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents",
-        },
-        body: JSON.stringify({
-          includedTypes: ["gas_station"],
-          maxResultCount: 20,
-          rankPreference: "DISTANCE",
-          locationRestriction: {
-            circle: {center: point, radius: 1609.344},
-          },
-          languageCode: "en-US",
-        }),
-      },
-    )));
     const unique = new Map<string, PlaceDetails>();
-    for (const result of responses) {
-      if (result.status !== "fulfilled") continue;
-      const places = Array.isArray(result.value.places) ? result.value.places : [];
+    let pageToken = "";
+    for (let page = 0; page < 3; page += 1) {
+      const response = await jsonResponse(
+        "https://places.googleapis.com/v1/places:searchText",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": googleMapsApiKey.value(),
+            "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents,nextPageToken",
+          },
+          body: JSON.stringify({
+            textQuery: "gas stations",
+            includedType: "gas_station",
+            strictTypeFiltering: true,
+            pageSize: 20,
+            languageCode: "en-US",
+            regionCode: "US",
+            searchAlongRouteParameters: {
+              polyline: {encodedPolyline},
+            },
+            ...(pageToken ? {pageToken} : {}),
+          }),
+        },
+      );
+      const places = Array.isArray(response.places) ? response.places : [];
       for (const rawPlace of places) {
         const place = object(rawPlace);
         const id = typeof place.id === "string" ? place.id : "";
@@ -391,107 +389,9 @@ async function gasStationsAlongRoute(
           searchRadiusMiles: 1,
         });
       }
-    }
-    return [...unique.values()]
-      .sort((first, second) =>
-        proximityToRoute(first, route).progress - proximityToRoute(second, route).progress,
-      )
-      .slice(0, 20);
-  });
-}
-
-async function gasStationsForSearchQuery(
-  rideId: string,
-  query: string,
-  encodedPolyline: string,
-  searchAnchors: ReadonlyArray<PlaceDetails>,
-): Promise<PlaceDetails[]> {
-  const anchorKey = searchAnchors
-    .slice(0, 3)
-    .map((anchor) => `${anchor.latitude.toFixed(4)},${anchor.longitude.toFixed(4)}`)
-    .join("|");
-  const cacheKey = `${rideId}:${normalizeSearchText(query)}:${anchorKey}`;
-  if (gasStationSearchCaches.size >= 100 && !gasStationSearchCaches.has(cacheKey)) {
-    gasStationSearchCaches.clear();
-  }
-  const cache = gasStationSearchCaches.get(cacheKey) ??
-    new AsyncTtlCache<PlaceDetails[]>(10 * 60_000);
-  gasStationSearchCaches.set(cacheKey, cache);
-  return cache.get(async () => {
-    const route = decodeGooglePolyline(encodedPolyline);
-    if (route.length < 2) return [];
-    const anchors = searchAnchors
-      .filter((anchor) => Number.isFinite(anchor.latitude) && Number.isFinite(anchor.longitude))
-      .slice(0, 3);
-    const responses = anchors.length > 0 ? await Promise.allSettled(anchors.map((anchor) =>
-      jsonResponse("https://places.googleapis.com/v1/places:searchNearby", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": googleMapsApiKey.value(),
-          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents",
-        },
-        body: JSON.stringify({
-          includedTypes: ["gas_station"],
-          maxResultCount: 20,
-          rankPreference: "DISTANCE",
-          locationRestriction: {
-            circle: {
-              center: {latitude: anchor.latitude, longitude: anchor.longitude},
-              radius: 25000,
-            },
-          },
-          languageCode: "en-US",
-        }),
-      }))) : await Promise.allSettled([
-      jsonResponse("https://places.googleapis.com/v1/places:searchText", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Goog-Api-Key": googleMapsApiKey.value(),
-          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.addressComponents",
-        },
-        body: JSON.stringify({
-          textQuery: `gas stations in ${query}, California`,
-          includedType: "gas_station",
-          strictTypeFiltering: true,
-          maxResultCount: 20,
-          languageCode: "en-US",
-          regionCode: "US",
-        }),
-      }),
-    ]);
-    const unique = new Map<string, PlaceDetails>();
-    for (const result of responses) {
-      if (result.status !== "fulfilled") continue;
-      const places = Array.isArray(result.value.places) ? result.value.places : [];
-      for (const rawPlace of places) {
-        const place = object(rawPlace);
-        const id = typeof place.id === "string" ? place.id : "";
-        const displayName = object(place.displayName).text;
-        const location = object(place.location);
-        if (!id || typeof displayName !== "string" ||
-            typeof place.formattedAddress !== "string" ||
-            typeof location.latitude !== "number" ||
-            typeof location.longitude !== "number" ||
-            !isCaliforniaAddress(place.addressComponents)) continue;
-        const point = {latitude: location.latitude, longitude: location.longitude};
-        if (!pointMatchesRouteAndSearchArea({
-          point,
-          route,
-          searchAnchors: anchors,
-        })) continue;
-        unique.set(id, {
-          placeId: id,
-          displayName,
-          formattedAddress: place.formattedAddress,
-          latitude: location.latitude,
-          longitude: location.longitude,
-          searchText: normalizeSearchText(`${displayName} ${place.formattedAddress}`),
-          administrativeAreaCode: "CA",
-          searchRadiusMiles: 1,
-        });
-      }
+      pageToken = typeof response.nextPageToken === "string" ?
+        response.nextPageToken : "";
+      if (!pageToken) break;
     }
     return [...unique.values()]
       .sort((first, second) =>
@@ -833,27 +733,7 @@ export const getRideStopPickerContext = onCall(
     const rideId = stringValue(data.rideId, "Ride", 128);
     const selectedPlaceId = typeof data.selectedPlaceId === "string" ?
       data.selectedPlaceId.trim() : "";
-    const rawSearchPlaceIds = Array.isArray(data.searchPlaceIds) ? data.searchPlaceIds : [];
-    if (rawSearchPlaceIds.length > 6 ||
-        rawSearchPlaceIds.some((value) => typeof value !== "string" ||
-          !value.trim() || value.trim().length > 300)) {
-      throw new HttpsError("invalid-argument", "Search results are invalid.");
-    }
-    const searchPlaceIds = [...new Set(
-      rawSearchPlaceIds.map((value) => String(value).trim()),
-    )];
     const includeGasStations = data.includeGasStations === true;
-    const gasStationQuery = typeof data.gasStationQuery === "string" ?
-      data.gasStationQuery.trim() : "";
-    if (gasStationQuery.length > 120) {
-      throw new HttpsError("invalid-argument", "Gas station search is invalid.");
-    }
-    const hasGasStationCenter = data.gasStationLatitude !== undefined ||
-      data.gasStationLongitude !== undefined;
-    const gasStationCenter = hasGasStationCenter ? {
-      latitude: coordinate(data.gasStationLatitude, "Map latitude", -90, 90),
-      longitude: coordinate(data.gasStationLongitude, "Map longitude", -180, 180),
-    } : undefined;
     const snapshot = await db.collection("rides").doc(rideId).get();
     const ride = snapshot.data();
     if (!ride || !["published", "in_progress"].includes(String(ride.status))) {
@@ -864,36 +744,8 @@ export const getRideStopPickerContext = onCall(
     if (!encodedPolyline) {
       throw new HttpsError("failed-precondition", "This ride route is unavailable.");
     }
-    const [selectedStop, searchStops] = await Promise.all([
-      selectedPlaceId ? placeDetails(selectedPlaceId) : Promise.resolve(undefined),
-      Promise.all(searchPlaceIds.map(placeDetails)),
-    ]);
+    const selectedStop = selectedPlaceId ? await placeDetails(selectedPlaceId) : undefined;
     if (selectedStop) requireCaliforniaPlace(selectedStop, "Pickup or drop-off");
-    for (const searchStop of searchStops) {
-      requireCaliforniaPlace(searchStop, "Search result");
-    }
-    const gasStationAnchors: PlaceDetails[] = [
-      ...(gasStationCenter ? [{
-        placeId: "map-center",
-        displayName: "Map center",
-        formattedAddress: "Map center",
-        latitude: gasStationCenter.latitude,
-        longitude: gasStationCenter.longitude,
-        searchText: "map center",
-        administrativeAreaCode: "CA",
-        searchRadiusMiles: 1,
-      }] : []),
-      ...searchStops,
-    ];
-    const stations = includeGasStations ?
-      (gasStationQuery.length >= 2 || gasStationCenter ?
-        await gasStationsForSearchQuery(
-          rideId,
-          gasStationQuery || "visible map",
-          encodedPolyline,
-          gasStationAnchors,
-        ) :
-        await gasStationsAlongRoute(rideId, encodedPolyline)) : [];
     const originData = object(ride.origin);
     const destinationData = object(ride.destination);
     const origin = {
@@ -911,6 +763,11 @@ export const getRideStopPickerContext = onCall(
     } catch {
       throw new HttpsError("failed-precondition", "This ride route is unavailable.");
     }
+    const stations = includeGasStations ? storedGasStationsForRider({
+      value: ride.gasStations,
+      route: routePoints,
+      anchor: selectedStop,
+    }) : [];
     return {
       mapPreviewUrl: rideStopMapPreviewUrl({
         rideId,
@@ -920,20 +777,20 @@ export const getRideStopPickerContext = onCall(
       }),
       gasStations: stations.map((station) => ({
         placeId: station.placeId,
-        displayName: station.formattedAddress,
-        mainText: station.displayName,
-        secondaryText: station.formattedAddress,
+        displayName: station.address,
+        mainText: station.name,
+        secondaryText: station.address,
         latitude: station.latitude,
         longitude: station.longitude,
       })),
-      searchResults: searchStops.map((place) => ({
-        placeId: place.placeId,
-        displayName: place.formattedAddress,
-        mainText: place.displayName,
-        secondaryText: place.formattedAddress,
-        latitude: place.latitude,
-        longitude: place.longitude,
-      })),
+      searchResults: selectedStop ? [{
+        placeId: selectedStop.placeId,
+        displayName: selectedStop.formattedAddress,
+        mainText: selectedStop.displayName,
+        secondaryText: selectedStop.formattedAddress,
+        latitude: selectedStop.latitude,
+        longitude: selectedStop.longitude,
+      }] : [],
       routePoints,
       mapCenter: viewport.center,
       mapZoom: viewport.zoom,
@@ -1083,6 +940,7 @@ export const createRide = onCall(
     );
     const references = departures.map(() => db.collection("rides").doc());
     const reference = references[0]!;
+    const gasStations = await gasStationsAlongRoute(reference.id, route.encodedPolyline);
     const recurrenceId = repeatWeekly ? reference.id : "";
     const shareBase = await remoteString("ride_share_base_url");
     const vehicle = object(profile.vehicle);
@@ -1108,6 +966,13 @@ export const createRide = onCall(
       distanceMiles: pricing.distanceMiles,
       durationSeconds: route.durationSeconds,
       encodedPolyline: route.encodedPolyline,
+      gasStations: gasStations.map((station) => ({
+        name: station.displayName,
+        address: station.formattedAddress,
+        lat: station.latitude,
+        lng: station.longitude,
+        place_id: station.placeId,
+      })),
       seatsTotal: seats,
       seatsAvailable: seats,
       pricePerSeatCents: pricing.pricePerSeatCents,

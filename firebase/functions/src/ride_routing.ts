@@ -8,10 +8,16 @@ export interface RouteProximity {
   progress: number;
 }
 
+export interface StoredGasStation extends GeoPoint {
+  placeId: string;
+  name: string;
+  address: string;
+}
+
 export type PolygonRing = ReadonlyArray<readonly [number, number]>;
 
 const milesPerLatitudeDegree = 69.0;
-// Keep returned map pins comfortably inside the client's one-mile limit.
+// Keep returned map pins inside the client's half-mile route corridor.
 // The buffer prevents a pin whose center barely passes the calculation from
 // appearing outside the visible route corridor because of map projection and
 // marker size.
@@ -63,6 +69,38 @@ export function gasStationMatchesRoute(
 ): boolean {
   return route.length >= 2 &&
     proximityToRoute(point, route).distanceMiles <= gasStationRouteMaximumMiles;
+}
+
+export function storedGasStationsForRider(params: {
+  value: unknown;
+  route: ReadonlyArray<GeoPoint>;
+  anchor?: GeoPoint;
+}): StoredGasStation[] {
+  if (!Array.isArray(params.value) || params.route.length < 2) return [];
+  const unique = new Map<string, StoredGasStation>();
+  for (const raw of params.value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const value = raw as Record<string, unknown>;
+    const placeId = typeof value.place_id === "string" ? value.place_id.trim() :
+      typeof value.placeId === "string" ? value.placeId.trim() : "";
+    const name = typeof value.name === "string" ? value.name.trim() :
+      typeof value.mainText === "string" ? value.mainText.trim() : "";
+    const address = typeof value.address === "string" ? value.address.trim() :
+      typeof value.displayName === "string" ? value.displayName.trim() : "";
+    const latitude = typeof value.lat === "number" ? value.lat : value.latitude;
+    const longitude = typeof value.lng === "number" ? value.lng : value.longitude;
+    if (!placeId || !name || !address || typeof latitude !== "number" ||
+        !Number.isFinite(latitude) || typeof longitude !== "number" ||
+        !Number.isFinite(longitude)) continue;
+    const station = {placeId, name, address, latitude, longitude};
+    if (!gasStationMatchesRoute(station, params.route)) continue;
+    unique.set(placeId, station);
+  }
+  const stations = [...unique.values()];
+  stations.sort((left, right) => params.anchor ?
+    distanceMilesBetween(left, params.anchor) - distanceMilesBetween(right, params.anchor) :
+    proximityToRoute(left, params.route).progress - proximityToRoute(right, params.route).progress);
+  return stations;
 }
 
 export function decodeGooglePolyline(value: string): GeoPoint[] {

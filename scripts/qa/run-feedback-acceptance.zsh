@@ -31,6 +31,10 @@ if [[ -n "${SIDECAR_VISUAL_PAUSE_MS:-}" ]]; then
   define_args+=("--dart-define=M5_VISUAL_PAUSE_MS=${SIDECAR_VISUAL_PAUSE_MS}")
 fi
 
+if [[ -n "${SIDECAR_SESSION_ROLE:-}" ]]; then
+  define_args+=("--dart-define=QA_SESSION_ROLE=${SIDECAR_SESSION_ROLE}")
+fi
+
 MAPS_API_KEY="$maps_api_key" "$flutter_bin" test \
   --no-pub \
   "$target" \

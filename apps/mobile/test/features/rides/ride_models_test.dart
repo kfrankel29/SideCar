@@ -143,7 +143,7 @@ void main() {
     expect(criteria.endAt, selected.add(const Duration(days: 1)));
   });
 
-  test('stop picker removes gas stations beyond one mile of the route', () {
+  test('stop picker removes gas stations beyond half a mile of the route', () {
     final context = RideStopPickerContext.fromJson({
       'routePoints': [
         {'latitude': 37.33, 'longitude': -121.90},

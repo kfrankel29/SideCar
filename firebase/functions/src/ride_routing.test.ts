@@ -11,6 +11,7 @@ import {
   routePointAllowed,
   routeSearchMatch,
   searchRadiusMilesForPlace,
+  storedGasStationsForRider,
 } from "./ride_routing.js";
 
 test("city searches use a wider discovery corridor than exact stops", () => {
@@ -98,6 +99,24 @@ test("gas station pins stay inside the half-mile route boundary", () => {
   assert.ok(proximityToRoute(justOutsideHalfMile, route).distanceMiles < 1);
   assert.ok(proximityToRoute(justOutsideHalfMile, route).distanceMiles > 0.5);
   assert.equal(gasStationMatchesRoute(justOutsideHalfMile, route), false);
+});
+
+test("rider maps reuse saved stations, filter the corridor, and sort by address", () => {
+  const route = [
+    {latitude: 37.30, longitude: -121.90},
+    {latitude: 37.50, longitude: -121.90},
+  ];
+  const stations = storedGasStationsForRider({
+    route,
+    anchor: {latitude: 37.48, longitude: -121.90},
+    value: [
+      {place_id: "south", name: "South Gas", address: "1 South St", lat: 37.32, lng: -121.90},
+      {place_id: "north", name: "North Gas", address: "1 North St", lat: 37.47, lng: -121.90},
+      {place_id: "outside", name: "Far Gas", address: "1 Far St", lat: 37.40, lng: -121.88},
+      {place_id: "north", name: "North Gas", address: "1 North St", lat: 37.47, lng: -121.90},
+    ],
+  });
+  assert.deepEqual(stations.map((station) => station.placeId), ["north", "south"]);
 });
 
 test("decodes the standard Google encoded polyline", () => {

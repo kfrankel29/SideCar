@@ -212,7 +212,7 @@ class WelcomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Catch rides between the Bay and UCSB\nwith verified students.',
+                'Catch rides across California with verified\nUCSB students.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall,
               ),

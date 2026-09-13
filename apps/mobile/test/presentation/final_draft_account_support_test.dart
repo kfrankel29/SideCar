@@ -63,7 +63,9 @@ void main() {
 
     expect(repository.deletedWith, 'DELETE');
     expect(repository.currentDeletionPassword, 'current-password');
-    expect(find.text('Welcome'), findsOneWidget);
+    // The root session listener owns post-deletion navigation so this screen
+    // cannot race a remote auth/profile removal with its own route change.
+    expect(find.text('Welcome'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

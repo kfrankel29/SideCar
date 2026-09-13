@@ -1,0 +1,95 @@
+name: SideCar manual pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Select the controlled operation to run
+        required: true
+        default: verify
+        type: choice
+        options:
+          - verify
+          - deploy-backend
+      production_confirmation:
+        description: Type "deploy sidecar production" for a backend deployment
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidecar-manual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Functions and Flutter checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: firebase/functions/package-lock.json
+
+      - name: Install function dependencies
+        working-directory: firebase/functions
+        run: npm ci
+
+      - name: Test functions
+        working-directory: firebase/functions
+        run: npm test
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.4
+          channel: stable
+          cache: true
+
+      - name: Install Flutter dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Analyze Flutter app
+        working-directory: apps/mobile
+        run: flutter analyze --no-pub
+
+      - name: Test Flutter app
+        working-directory: apps/mobile
+        run: flutter test --no-pub
+
+  deploy_backend:
+    name: Deploy Firebase backend
+    needs: quality
+    if: >-
+      ${{ inputs.operation == 'deploy-backend' &&
+          inputs.production_confirmation == 'deploy sidecar production' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+
+      - name: Install function dependencies
+        working-directory: firebase/functions
+        run: npm ci
+
+      - name: Deploy functions and Firestore rules
+        run: >-
+          npx --yes firebase-tools@15.30.0 deploy
+          --project sidecar-fb0e7
+          --only functions,firestore:rules
+          --non-interactive

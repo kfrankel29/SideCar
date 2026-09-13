@@ -22,6 +22,7 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
     with WidgetsBindingObserver {
   bool _wasBackgrounded = false;
   bool _isValidatingSession = false;
+  bool _isEndingRevokedSession = false;
   int _notificationInitializationAttempts = 0;
   StreamSubscription<NotificationAction>? _notificationSubscription;
   StreamSubscription<NotificationAction>? _notificationUpdateSubscription;
@@ -136,8 +137,27 @@ class _SideCarAppState extends ConsumerState<SideCarApp>
     if (mounted) ref.read(appRouterProvider).go(AppRoutes.welcome);
   }
 
+  Future<void> _endRevokedSession() async {
+    if (_isEndingRevokedSession) return;
+    _isEndingRevokedSession = true;
+    try {
+      await ref.read(authRepositoryProvider).signOut();
+    } on Object {
+      // The server may already have removed the Firebase Auth account.
+    } finally {
+      _resetToWelcome();
+      _isEndingRevokedSession = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen(currentProfileProvider, (previous, next) {
+      if (next.value?.isDeleted == true) unawaited(_endRevokedSession());
+    });
+    ref.listen(authStateProvider, (previous, next) {
+      if (previous?.value != null && next.value == null) _resetToWelcome();
+    });
     final router = ref.watch(appRouterProvider);
 
     return MaterialApp.router(

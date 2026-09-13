@@ -7,6 +7,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:sidecar/src/core/firebase/app_bootstrap.dart';
 import 'package:sidecar/src/features/profile/domain/user_profile.dart';
 import 'package:sidecar/src/features/rides/domain/ride_models.dart';
+import 'package:sidecar/src/features/verification/domain/verification_models.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -48,6 +49,28 @@ void main() {
     expect(driver.id, isNot(rider.id));
     debugPrint('M5_FEEDBACK_STEP=driver-sign-in');
     await _signIn(bootstrap, driver);
+
+    debugPrint('M5_FEEDBACK_STEP=vehicle-save');
+    const clientVehicle = VehicleProfile(
+      year: 2014,
+      make: 'Lexus',
+      model: 'RX',
+      color: 'Blue',
+      licensePlate: '8A3HT7',
+    );
+    await bootstrap.verificationRepository
+        .saveVehicle(clientVehicle)
+        .timeout(const Duration(seconds: 40));
+    final savedVehicle =
+        (await bootstrap.verificationRepository
+                .loadCurrentVerification()
+                .timeout(const Duration(seconds: 40)))
+            .vehicle;
+    expect(savedVehicle?.year, clientVehicle.year);
+    expect(savedVehicle?.makeAndModel, clientVehicle.makeAndModel);
+    expect(savedVehicle?.color, clientVehicle.color);
+    expect(savedVehicle?.licensePlate, clientVehicle.licensePlate);
+    expect(savedVehicle?.photoUrl, isEmpty);
 
     debugPrint('M5_FEEDBACK_STEP=origin');
     final origin = await _firstPlace(
@@ -128,30 +151,37 @@ void main() {
         reason: 'The same route must not match an opposite-direction search.',
       );
 
-      debugPrint('M5_FEEDBACK_STEP=driver-resign-in');
-      await _signIn(bootstrap, driver);
+      debugPrint('M5_FEEDBACK_STEP=rider-map-sign-in');
+      await _signIn(bootstrap, rider);
 
       RidePlacePrediction? markerToResolve;
+      Set<String>? persistedStationIds;
       for (final query in ['San Jose', 'San Mateo']) {
         debugPrint('M5_FEEDBACK_STEP=route-context-$query');
-        final anchors = await bootstrap.rideRepository
-            .searchPlaces(query)
-            .timeout(const Duration(seconds: 40));
-        expect(anchors, isNotEmpty);
+        final selectedAddress = await _firstPlace(bootstrap, query);
         final context = await bootstrap.rideRepository
             .getRideStopPickerContext(
               routeRide.id,
-              searchPlaceIds: anchors
-                  .map((place) => place.placeId)
-                  .toList(growable: false),
+              selectedPlaceId: selectedAddress.placeId,
               includeGasStations: true,
-              gasStationQuery: query,
             )
             .timeout(const Duration(seconds: 30));
         expect(context.routePoints, isNotEmpty);
-        expect(context.searchResults, isNotEmpty);
+        expect(context.searchResults, hasLength(1));
+        expect(context.searchResults.single.placeId, selectedAddress.placeId);
         expect(context.gasStations, isNotEmpty);
+        final stationIds = context.gasStations
+            .map((station) => station.placeId)
+            .toSet();
+        persistedStationIds ??= stationIds;
+        expect(
+          stationIds,
+          persistedStationIds,
+          reason:
+              'Rider address changes must reorder the persisted trip stations, not run a new gas search.',
+        );
         markerToResolve ??= context.gasStations.first;
+        var previousDistance = -1.0;
         for (final station in context.gasStations) {
           expect(
             _routeDistanceMiles(station, context.routePoints),
@@ -159,13 +189,16 @@ void main() {
             reason:
                 '${station.displayName} must remain inside the half-mile route limit',
           );
-          expect(
-            context.searchResults.any(
-              (anchor) => _distanceMiles(station, anchor) <= 15.6,
-            ),
-            isTrue,
-            reason: '${station.displayName} must stay near $query',
+          final riderDistance = _distanceMiles(
+            station,
+            context.searchResults.single,
           );
+          expect(
+            riderDistance,
+            greaterThanOrEqualTo(previousDistance),
+            reason: 'The nearest saved station must be highlighted first.',
+          );
+          previousDistance = riderDistance;
         }
       }
 
@@ -184,6 +217,7 @@ void main() {
     } finally {
       debugPrint('M5_FEEDBACK_STEP=restore');
       if (createdRouteForTest && routeRide != null) {
+        await _signIn(bootstrap, driver);
         await bootstrap.rideRepository
             .cancelRide(routeRide.id)
             .timeout(const Duration(seconds: 40));

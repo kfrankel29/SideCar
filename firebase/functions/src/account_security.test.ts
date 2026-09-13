@@ -3,13 +3,15 @@ import test from "node:test";
 import {hasOpenAccountObligations} from "./account_security.js";
 
 test("account deletion blocks open rides", () => {
-  assert.equal(hasOpenAccountObligations(["open"], []), true);
   assert.equal(hasOpenAccountObligations(["in_progress"], []), true);
 });
 
+test("account deletion ignores orphaned legacy states without a departure", () => {
+  assert.equal(hasOpenAccountObligations(["open", "published"], []), false);
+  assert.equal(hasOpenAccountObligations([], ["pending_driver", "confirmed"]), false);
+});
+
 test("account deletion blocks unsettled booking states", () => {
-  assert.equal(hasOpenAccountObligations([], ["pending_driver"]), true);
-  assert.equal(hasOpenAccountObligations([], ["accepted_payment_pending"]), true);
   assert.equal(hasOpenAccountObligations([], ["payment_processing"]), true);
   assert.equal(hasOpenAccountObligations([], ["completion_processing"]), true);
   assert.equal(hasOpenAccountObligations([], ["payout_held"]), true);

@@ -223,6 +223,33 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
+  testWidgets('profile setup accepts the legacy Other gender value', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(const _SignedInAuth()),
+          profileRepositoryProvider.overrideWithValue(
+            _MemoryProfileRepository(
+              profile: _MemoryProfileRepository.completeProfile.copyWith(
+                gender: 'Other',
+              ),
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: const ProfileSetupScreen(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Other'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('role selection matches the Final Draft copy', (tester) async {
     await tester.pumpWidget(
       ProviderScope(

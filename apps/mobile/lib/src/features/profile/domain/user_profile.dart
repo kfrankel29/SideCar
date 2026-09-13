@@ -40,6 +40,7 @@ class UserProfile {
     this.creditCents = 0,
     this.totalEarningsCents = 0,
     this.primaryRole,
+    this.accountStatus = 'active',
   });
 
   final String userId;
@@ -61,6 +62,9 @@ class UserProfile {
 
   final String photoUrl;
   final PrimaryRole? primaryRole;
+  final String accountStatus;
+
+  bool get isDeleted => accountStatus == 'deleted';
 
   String get displayName => '$firstName $lastName'.trim();
 
@@ -104,6 +108,7 @@ class UserProfile {
         'driver' => PrimaryRole.driver,
         _ => null,
       },
+      accountStatus: json['accountStatus'] as String? ?? 'active',
     );
   }
 
@@ -149,6 +154,7 @@ class UserProfile {
       totalEarningsCents: totalEarningsCents,
       photoUrl: photoUrl ?? this.photoUrl,
       primaryRole: primaryRole ?? this.primaryRole,
+      accountStatus: accountStatus,
     );
   }
 }

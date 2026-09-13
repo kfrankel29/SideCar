@@ -53,7 +53,7 @@ function record(value: unknown): AccountObligationRecord {
 
 function isCurrentTrip(value: AccountObligationRecord, nowMs: number): boolean {
   const departureAt = timestampMillis(value.departureAt);
-  return departureAt === null || departureAt >= nowMs - staleTripGraceMs;
+  return departureAt !== null && departureAt >= nowMs - staleTripGraceMs;
 }
 
 export function hasOpenAccountObligations(
@@ -63,8 +63,9 @@ export function hasOpenAccountObligations(
 ): boolean {
   const ridesBlock = rideRecords.some((value) => {
     const candidate = record(value);
-    return activeRideStatuses.has(String(candidate.status)) &&
-      isCurrentTrip(candidate, nowMs);
+    const status = String(candidate.status);
+    return status === "in_progress" ||
+      (activeRideStatuses.has(status) && isCurrentTrip(candidate, nowMs));
   });
   if (ridesBlock) return true;
   return bookingRecords.some((value) => {

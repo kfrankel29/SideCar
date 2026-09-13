@@ -68,7 +68,6 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
   final TransformationController _mapTransformation =
       TransformationController();
   GoogleMapController? _googleMapController;
-  LatLng? _visibleMapCenter;
 
   @override
   void initState() {
@@ -161,7 +160,6 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
   Future<void> _loadRouteContext({
     RidePlacePrediction? selected,
     bool? includeGasStations,
-    LatLng? gasStationCenter,
   }) async {
     if (widget.rideId.isEmpty) return;
     final shouldLoadGasStations = includeGasStations ?? _gasStationsLoaded;
@@ -177,15 +175,7 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
           .getRideStopPickerContext(
             widget.rideId,
             selectedPlaceId: _selected?.placeId ?? '',
-            searchPlaceIds: _places
-                .map((place) => place.placeId)
-                .toList(growable: false),
             includeGasStations: shouldLoadGasStations,
-            gasStationQuery: shouldLoadGasStations
-                ? _gasStationSearchQuery
-                : '',
-            gasStationLatitude: gasStationCenter?.latitude,
-            gasStationLongitude: gasStationCenter?.longitude,
           );
       if (mounted) {
         setState(() {
@@ -216,15 +206,11 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
   }
 
   Future<void> _showGasStations() {
-    final selected = _selected;
-    final selectedCenter =
-        selected != null && (selected.latitude != 0 || selected.longitude != 0)
-        ? LatLng(selected.latitude, selected.longitude)
-        : null;
-    return _loadRouteContext(
-      includeGasStations: true,
-      gasStationCenter: _gasStationsLoaded ? _visibleMapCenter : selectedCenter,
-    );
+    final routeContext = _routeContext;
+    if (_gasStationsLoaded && routeContext != null) {
+      return _moveNativeMapToContext(routeContext, preferGasStations: true);
+    }
+    return _loadRouteContext(includeGasStations: true);
   }
 
   void _choose(RidePlacePrediction place) {
@@ -240,7 +226,7 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
     setState(() {
       _selected = place;
       if (!choosingGasStation) {
-        _gasStationsLoaded = false;
+        _gasStationsLoaded = true;
         _gasStationSearchQuery = place.mainText;
       }
       _query
@@ -249,7 +235,11 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
       _error = null;
     });
     _queryFocus.unfocus();
-    unawaited(_loadRouteContext(selected: place));
+    unawaited(
+      choosingGasStation
+          ? _moveNativeMapToContext(_routeContext!, preferGasStations: true)
+          : _loadRouteContext(selected: place, includeGasStations: true),
+    );
   }
 
   void _addPlaceResult(RidePlacePrediction place) {
@@ -549,7 +539,7 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
                   _loadingGasStations
                       ? 'Loading gas stations…'
                       : _gasStationsLoaded
-                      ? 'Reload gas stations in this map area'
+                      ? 'Center saved gas stations'
                       : 'Show gas stations',
                 ),
               ),
@@ -563,19 +553,21 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
               padding: EdgeInsets.only(top: _places.isEmpty ? 0 : 14),
               child: Text(
                 _gasStationSearchQuery.isEmpty
-                    ? 'Gas stations within 1 mile of the route'
-                    : 'Gas stations near $_gasStationSearchQuery',
+                    ? 'Gas stations within 0.5 miles of the route'
+                    : 'Closest gas stations to $_gasStationSearchQuery',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
             ..._routeContext!.gasStations
                 .take(3)
+                .indexed
                 .map(
-                  (place) => _PlaceTile(
-                    place: place,
-                    selected: _selected?.placeId == place.placeId,
+                  (entry) => _PlaceTile(
+                    place: entry.$2,
+                    badge: entry.$1 == 0 ? 'Closest' : null,
+                    selected: _selected?.placeId == entry.$2.placeId,
                     icon: Icons.local_gas_station_outlined,
-                    onTap: () => _choose(place),
+                    onTap: () => _choose(entry.$2),
                   ),
                 ),
           ],
@@ -587,7 +579,7 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
               padding: const EdgeInsets.only(top: 8),
               child: Text(
                 _gasStationSearchQuery.isEmpty
-                    ? 'No gas stations found within 1 mile of this route.'
+                    ? 'No gas stations found within 0.5 miles of this route.'
                     : 'No gas stations found near $_gasStationSearchQuery.',
               ),
             ),
@@ -628,9 +620,15 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
               markerId: MarkerId('gas-$index-${station.placeId}'),
               position: LatLng(station.latitude, station.longitude),
               icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueOrange,
+                index == 0 && _selected != null
+                    ? BitmapDescriptor.hueGreen
+                    : BitmapDescriptor.hueOrange,
               ),
-              infoWindow: InfoWindow(title: station.mainText),
+              infoWindow: InfoWindow(
+                title: index == 0 && _selected != null
+                    ? 'Closest · ${station.mainText}'
+                    : station.mainText,
+              ),
               onTap: () => _choose(station),
             ),
         for (final (index, place) in route.searchResults.indexed)
@@ -683,13 +681,8 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
             zoomGesturesEnabled: true,
             onTap: _dropNativePin,
             onLongPress: _dropNativePin,
-            onCameraMove: (position) => _visibleMapCenter = position.target,
             onMapCreated: (controller) {
               _googleMapController = controller;
-              _visibleMapCenter = LatLng(
-                route.mapCenterLatitude,
-                route.mapCenterLongitude,
-              );
               unawaited(
                 _moveNativeMapToContext(
                   route,
@@ -815,12 +808,14 @@ class _PlaceTile extends StatelessWidget {
     required this.selected,
     required this.icon,
     required this.onTap,
+    this.badge,
   });
 
   final RidePlacePrediction place;
   final bool selected;
   final IconData icon;
   final VoidCallback onTap;
+  final String? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -829,7 +824,11 @@ class _PlaceTile extends StatelessWidget {
       leading: Icon(icon),
       title: Text(place.mainText),
       subtitle: place.secondaryText.isEmpty ? null : Text(place.secondaryText),
-      trailing: selected ? const Icon(Icons.check_circle) : null,
+      trailing: selected
+          ? const Icon(Icons.check_circle)
+          : badge == null
+          ? null
+          : Chip(label: Text(badge!), visualDensity: VisualDensity.compact),
       selected: selected,
       onTap: onTap,
     );

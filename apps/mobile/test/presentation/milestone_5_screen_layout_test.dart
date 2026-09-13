@@ -358,27 +358,26 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('route-stop-map')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Show gas stations'), findsOneWidget);
-    await tester.tap(find.text('Show gas stations'));
-    await tester.pumpAndSettle();
-
     expect(repository.requestedGasStations, isTrue);
     expect(repository.gasStationRequestCount, 1);
-    expect(find.text('Reload gas stations in this map area'), findsOneWidget);
-    expect(find.text('Gas stations near Dropped pin'), findsOneWidget);
+    expect(find.text('Center saved gas stations'), findsOneWidget);
+    expect(find.text('Closest gas stations to Dropped pin'), findsOneWidget);
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pumpAndSettle();
     expect(find.text('Central Coast Gas'), findsOneWidget);
     await tester.tap(find.text('Central Coast Gas'));
     await tester.pumpAndSettle();
 
-    expect(repository.selectedPlaceId, 'gas-1');
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller?.text,
+      'Central Coast Gas, Goleta, CA',
+    );
     expect(find.text('Use this address'), findsOneWidget);
     expect(find.byIcon(Icons.check_circle), findsWidgets);
     final requestsBeforeReload = repository.gasStationRequestCount;
-    await tester.tap(find.text('Reload gas stations in this map area'));
+    await tester.tap(find.text('Center saved gas stations'));
     await tester.pumpAndSettle();
-    expect(repository.gasStationRequestCount, requestsBeforeReload + 1);
+    expect(repository.gasStationRequestCount, requestsBeforeReload);
     expect(tester.takeException(), isNull);
   });
 
@@ -461,13 +460,8 @@ void main() {
 
     expect(find.byKey(const ValueKey('interactive-route-map')), findsOneWidget);
     expect(find.text('Use this address'), findsOneWidget);
-    expect(find.text('Show gas stations'), findsOneWidget);
-    expect(find.text('Central Coast Gas'), findsNothing);
-
-    await tester.tap(find.text('Show gas stations'));
-    await tester.pumpAndSettle();
-
     expect(repository.requestedGasStations, isTrue);
+    expect(find.text('Center saved gas stations'), findsOneWidget);
     expect(find.text('Central Coast Gas'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
