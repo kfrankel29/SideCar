@@ -5,6 +5,12 @@ set -euo pipefail
 script_dir=${0:A:h}
 app_dir=${script_dir:h}
 config_file=${1:-$app_dir/.local/firebase-ios.json}
+flutter_bin=${FLUTTER_BIN:-/Users/shohruh/Documents/Personal/Bandmate/.codex-tools-bandmate-20260821/flutter-3.41.4-exact/flutter/bin/flutter}
+
+if [[ ! -x $flutter_bin ]]; then
+  print -u2 "Missing Flutter executable: $flutter_bin"
+  exit 1
+fi
 
 if [[ ! -f $config_file ]]; then
   print -u2 "Missing Firebase configuration: $config_file"
@@ -18,6 +24,8 @@ required_keys=(
   FIREBASE_PROJECT_ID
   FIREBASE_STORAGE_BUCKET
   MAPS_API_KEY
+  SIDECAR_GOOGLE_IOS_CLIENT_ID
+  SIDECAR_GOOGLE_SERVER_CLIENT_ID
 )
 
 for key in $required_keys; do
@@ -32,7 +40,7 @@ maps_xcconfig=$app_dir/.local/GoogleMaps.xcconfig
 print -r -- "GOOGLE_MAPS_API_KEY = $maps_api_key" > "$maps_xcconfig"
 
 cd "$app_dir"
-flutter build ipa --release --dart-define-from-file="$config_file"
+"$flutter_bin" build ipa --release --dart-define-from-file="$config_file"
 
 archive_plist=$app_dir/build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Info.plist
 expected_build=$(sed -nE 's/^version: [^+]+\+([0-9]+)$/\1/p' pubspec.yaml)

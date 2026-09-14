@@ -1255,7 +1255,9 @@ export const searchRides = onCall(
 );
 
 export const listLeavingSoon = onCall(
-  {region, enforceAppCheck: true, maxInstances: 60},
+  // This is an intentionally public, sanitized browse endpoint. Guest users
+  // must be able to load it before the device has a usable App Check token.
+  {region, enforceAppCheck: false, maxInstances: 60},
   async (request) => {
     if (request.auth) await requireVerifiedUser(request.auth.uid);
     const snapshot = await db.collection("rides")
@@ -1285,7 +1287,9 @@ export const listLeavingSoon = onCall(
 );
 
 export const getRide = onCall(
-  {region, enforceAppCheck: true, maxInstances: 60},
+  // Published rides are intentionally browsable before authentication. The
+  // handler below still limits guests to the public projection.
+  {region, enforceAppCheck: false, maxInstances: 60},
   async (request) => {
     const rideId = stringValue(object(request.data).rideId, "Ride", 128);
     const snapshot = await db.collection("rides").doc(rideId).get();

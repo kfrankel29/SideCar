@@ -28,6 +28,7 @@ required_keys=(
   FIREBASE_PROJECT_ID
   FIREBASE_STORAGE_BUCKET
   MAPS_API_KEY
+  SIDECAR_GOOGLE_SERVER_CLIENT_ID
 )
 
 for key in $required_keys; do
