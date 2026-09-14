@@ -99,13 +99,13 @@ void main() {
       for (var attempt = 0; attempt < 30; attempt++) {
         await tester.pump(const Duration(seconds: 1));
         if (primaryAuth.currentUser == null &&
-            find.text('Create account').evaluate().isNotEmpty) {
+            find.text('Find your ride').evaluate().isNotEmpty) {
           break;
         }
       }
       expect(primaryAuth.currentUser, isNull);
-      expect(find.text('Create account'), findsOneWidget);
-      expect(find.text('Log in'), findsOneWidget);
+      expect(find.text('Find your ride'), findsOneWidget);
+      expect(find.text('Profile'), findsNothing);
 
       await expectLater(
         primaryAuth.signInWithEmailAndPassword(

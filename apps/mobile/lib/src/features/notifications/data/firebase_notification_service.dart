@@ -23,7 +23,9 @@ class FirebaseNotificationService implements NotificationService {
       StreamController<NotificationAction>.broadcast();
   bool _initialized = false;
   bool _listenersAttached = false;
+  bool _permissionPromptAttempted = false;
   Future<void>? _initialization;
+  Future<void>? _registration;
 
   static const _channel = AndroidNotificationChannel(
     'sidecar_activity',
@@ -123,15 +125,32 @@ class FirebaseNotificationService implements NotificationService {
   }
 
   @override
-  Future<void> refreshRegistration() async {
-    if (_auth.currentUser == null) return;
+  Future<void> refreshRegistration() {
+    if (_auth.currentUser == null) return Future<void>.value();
+    final pending = _registration;
+    if (pending != null) return pending;
+    final registration = _refreshRegistration();
+    _registration = registration;
+    return registration;
+  }
+
+  Future<void> _refreshRegistration() async {
     try {
-      final settings = await _messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: false,
-      );
+      var settings = await _messaging.getNotificationSettings();
+      if (settings.authorizationStatus == AuthorizationStatus.notDetermined) {
+        // Opening the native permission dialog backgrounds and resumes the app.
+        // Lifecycle and auth listeners can both request registration during
+        // that transition, so prompt at most once per process and share the
+        // in-flight registration above.
+        if (_permissionPromptAttempted) return;
+        _permissionPromptAttempted = true;
+        settings = await _messaging.requestPermission(
+          alert: true,
+          badge: true,
+          sound: true,
+          provisional: false,
+        );
+      }
       if (settings.authorizationStatus == AuthorizationStatus.denied) return;
       if (Platform.isIOS) {
         for (var attempt = 0; attempt < 60; attempt++) {
@@ -150,6 +169,8 @@ class FirebaseNotificationService implements NotificationService {
       return;
     } on PlatformException {
       return;
+    } finally {
+      _registration = null;
     }
   }
 

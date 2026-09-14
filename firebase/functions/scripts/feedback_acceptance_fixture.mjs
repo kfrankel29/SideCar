@@ -143,6 +143,44 @@ async function unregisterAppCheckDebugToken(appId, debugToken) {
   }
 }
 
+async function cleanupFeedbackAppCheckTokens() {
+  const access = await cliAuth.getAccessToken(
+    account.tokens.refresh_token,
+    cliApi.getScopes(),
+  );
+  let removed = 0;
+  for (const appId of [iosAppId, androidAppId]) {
+    const listResponse = await fetch(
+      `https://firebaseappcheck.googleapis.com/v1/projects/${projectId}/apps/${appId}/debugTokens?pageSize=100`,
+      {headers: {authorization: `Bearer ${access.access_token}`}},
+    );
+    if (!listResponse.ok) {
+      throw new Error(`App Check token list failed (${listResponse.status}).`);
+    }
+    const payload = await listResponse.json();
+    const feedbackTokens = (payload.debugTokens ?? []).filter(
+      (candidate) => candidate.displayName?.startsWith("Feedback acceptance "),
+    );
+    for (const token of feedbackTokens) {
+      if (!token.name) continue;
+      const deleteResponse = await fetch(
+        `https://firebaseappcheck.googleapis.com/v1/${token.name}`,
+        {
+          method: "DELETE",
+          headers: {authorization: `Bearer ${access.access_token}`},
+        },
+      );
+      if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        throw new Error(
+          `App Check token deletion failed (${deleteResponse.status}).`,
+        );
+      }
+      removed += 1;
+    }
+  }
+  process.stdout.write(`Removed ${removed} stale feedback App Check tokens.\n`);
+}
+
 async function ensureAppCheckDebugToken() {
   const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
   if (typeof fixture.SIDECAR_APP_CHECK_DEBUG_TOKEN === "string" &&
@@ -396,10 +434,13 @@ try {
     await inspectOrRepairShareUrls({apply: true});
   }
   else if (command === "reset-transient") await resetTransientData();
+  else if (command === "cleanup-appcheck") {
+    await cleanupFeedbackAppCheckTokens();
+  }
   else if (command === "cleanup") await cleanup();
   else throw new Error(
     "Use setup, appcheck, hydrate, inspect, inspect-share-urls, repair-share-urls, " +
-    "reset-transient, or cleanup.",
+    "reset-transient, cleanup-appcheck, or cleanup.",
   );
 } finally {
   await deleteApp(app);

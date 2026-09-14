@@ -35,6 +35,10 @@ if [[ -n "${SIDECAR_SESSION_ROLE:-}" ]]; then
   define_args+=("--dart-define=QA_SESSION_ROLE=${SIDECAR_SESSION_ROLE}")
 fi
 
+if [[ "${SIDECAR_USE_SECOND_QA_ACCOUNT:-false}" == "true" ]]; then
+  define_args+=("--dart-define=USE_SECOND_QA_ACCOUNT=true")
+fi
+
 MAPS_API_KEY="$maps_api_key" "$flutter_bin" test \
   --no-pub \
   "$target" \

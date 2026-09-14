@@ -13,7 +13,7 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'self deletion returns to welcome without a stale link page',
+    'self deletion returns to guest Home without a stale link page',
     (tester) async {
       expect(_email, isNotEmpty);
       expect(_password, isNotEmpty);
@@ -52,14 +52,14 @@ void main() {
       for (var attempt = 0; attempt < 150; attempt++) {
         await tester.pump(const Duration(seconds: 1));
         if (auth.currentUser == null &&
-            find.text('Create account').evaluate().isNotEmpty) {
+            find.text('Find your ride').evaluate().isNotEmpty) {
           break;
         }
       }
 
       expect(auth.currentUser, isNull);
-      expect(find.text('Create account'), findsOneWidget);
-      expect(find.text('Log in'), findsOneWidget);
+      expect(find.text('Find your ride'), findsOneWidget);
+      expect(find.text('Profile'), findsNothing);
       expect(find.text('This link is no longer available.'), findsNothing);
       await expectLater(
         auth.signInWithEmailAndPassword(email: _email, password: _password),
