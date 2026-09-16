@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -122,6 +121,51 @@ void main() {
 
     expect(tester.widget<EditableText>(passwordInput).obscureText, isFalse);
     expect(find.byTooltip('Hide password'), findsOneWidget);
+  });
+
+  testWidgets('iOS login uses only SideCar email and password', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authRepositoryProvider.overrideWithValue(
+              const UnavailableAuthRepository(),
+            ),
+          ],
+          child: MaterialApp(theme: AppTheme.light, home: const LoginScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Continue with Google'), findsNothing);
+      expect(find.text('School email'), findsOneWidget);
+      expect(find.text('Password'), findsOneWidget);
+      expect(find.text('Log in'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('Android login keeps Google sign-in', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    try {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            authRepositoryProvider.overrideWithValue(
+              const UnavailableAuthRepository(),
+            ),
+          ],
+          child: MaterialApp(theme: AppTheme.light, home: const LoginScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Continue with Google'), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 
   testWidgets('profile photo offers camera and photo library', (tester) async {

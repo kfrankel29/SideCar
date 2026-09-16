@@ -10,6 +10,7 @@ jdk_home="$tool_root/jdk-17.0.20+8/Contents/Home"
 key_store="$mobile_root/android/keystore/sidecar-upload.jks"
 keychain_service="com.kaileefrankel.sidecar.google-play-upload"
 config_file="${1:-$mobile_root/.local/firebase-android.json}"
+build_number="${SIDECAR_BUILD_NUMBER:-}"
 
 if [[ ! -f "$key_store" ]]; then
   print -u2 "Missing SideCar upload keystore: $key_store"
@@ -42,6 +43,15 @@ key_password="$(/usr/bin/security find-generic-password -a SideCar -s "$keychain
 maps_api_key="$(jq -r '.MAPS_API_KEY' "$config_file")"
 
 cd "$mobile_root"
+build_args=(
+  --release
+  --no-pub
+  --dart-define-from-file="$config_file"
+)
+if [[ -n "$build_number" ]]; then
+  build_args+=(--build-number="$build_number")
+fi
+
 ANDROID_HOME="$android_sdk" \
 ANDROID_SDK_ROOT="$android_sdk" \
 JAVA_HOME="$jdk_home" \
@@ -50,5 +60,4 @@ SIDECAR_UPLOAD_STORE_PASSWORD="$key_password" \
 SIDECAR_UPLOAD_KEY_ALIAS="upload" \
 SIDECAR_UPLOAD_KEY_PASSWORD="$key_password" \
 MAPS_API_KEY="$maps_api_key" \
-  "$flutter_bin" build appbundle --release --no-pub \
-    --dart-define-from-file="$config_file"
+  "$flutter_bin" build appbundle $build_args

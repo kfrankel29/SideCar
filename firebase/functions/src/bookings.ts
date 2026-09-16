@@ -72,6 +72,16 @@ function capitalize(value: string): string {
   return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
 }
 
+function riderPaymentMethod(value: unknown): "card" {
+  if (value === "bank") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Bank payments are temporarily unavailable. Please use a card.",
+    );
+  }
+  return "card";
+}
+
 function seatKey(value: unknown): SeatKey {
   if (value === "front" || value === "rear_left" || value === "rear_right") {
     return value;
@@ -652,7 +662,7 @@ export const createBookingPayment = onCall(
     await requireVerifiedUser(request.auth.uid);
     const data = object(request.data);
     const id = stringValue(data.bookingId, "Request", 128);
-    const paymentMethod = data.paymentMethod === "bank" ? "bank" : "card";
+    const paymentMethod = riderPaymentMethod(data.paymentMethod);
     const reference = db.collection("bookings").doc(id);
     const snapshot = await reference.get();
     const booking = snapshot.data();
@@ -745,7 +755,7 @@ export const createBookingPayment = onCall(
           amount: amounts.totalCents,
           currency: "usd",
           customer: customer.customerId,
-          payment_method_types: [paymentMethod === "bank" ? "us_bank_account" : "card"],
+          payment_method_types: ["card"],
           setup_future_usage: "off_session",
           metadata: {
             bookingId: id,
@@ -777,7 +787,7 @@ export const createBookingPayment = onCall(
       publishableKey: stripePublishableKey.value().trim(),
       customerId: customer.customerId,
       ephemeralKeySecret: customer.ephemeralKeySecret,
-      allowsDelayedPaymentMethods: paymentMethod === "bank",
+      allowsDelayedPaymentMethods: false,
       merchantDisplayName: "SideCar",
       amounts,
     };
@@ -791,7 +801,7 @@ export const quoteBookingPayment = onCall(
     await requireVerifiedUser(request.auth.uid);
     const data = object(request.data);
     const id = stringValue(data.bookingId, "Request", 128);
-    const paymentMethod = data.paymentMethod === "bank" ? "bank" : "card";
+    const paymentMethod = riderPaymentMethod(data.paymentMethod);
     const [bookingSnapshot, userSnapshot] = await Promise.all([
       db.collection("bookings").doc(id).get(),
       db.collection("users").doc(request.auth.uid).get(),
@@ -832,11 +842,11 @@ export const createPaymentMethodSetup = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
     await requireVerifiedUser(request.auth.uid);
     const data = object(request.data);
-    const paymentMethod = data.paymentMethod === "bank" ? "bank" : "card";
+    const paymentMethod = riderPaymentMethod(data.paymentMethod);
     const customer = await customerSession(request.auth.uid);
     const intent = await stripe().setupIntents.create({
       customer: customer.customerId,
-      payment_method_types: [paymentMethod === "bank" ? "us_bank_account" : "card"],
+      payment_method_types: ["card"],
       usage: "off_session",
       metadata: {sidecarUid: request.auth.uid, paymentMethod},
     }, {
@@ -851,7 +861,7 @@ export const createPaymentMethodSetup = onCall(
       publishableKey: stripePublishableKey.value().trim(),
       customerId: customer.customerId,
       ephemeralKeySecret: customer.ephemeralKeySecret,
-      allowsDelayedPaymentMethods: paymentMethod === "bank",
+      allowsDelayedPaymentMethods: false,
       merchantDisplayName: "SideCar",
     };
   },
@@ -863,18 +873,11 @@ export const listPaymentMethods = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
     await requireVerifiedUser(request.auth.uid);
     const customerId = await stripeCustomerId(request.auth.uid);
-    const [cards, bankAccounts] = await Promise.all([
-      stripe().paymentMethods.list({
-        customer: customerId,
-        type: "card",
-        limit: 20,
-      }),
-      stripe().paymentMethods.list({
-        customer: customerId,
-        type: "us_bank_account",
-        limit: 20,
-      }),
-    ]);
+    const cards = await stripe().paymentMethods.list({
+      customer: customerId,
+      type: "card",
+      limit: 20,
+    });
     return {
       methods: [
         ...cards.data.map((method) => ({
@@ -883,12 +886,6 @@ export const listPaymentMethods = onCall(
           label: `${capitalize(method.card?.brand ?? "Card")} •${method.card?.last4 ?? ""}`,
           detail: method.card?.exp_month && method.card?.exp_year ?
             `Expires ${String(method.card.exp_month).padStart(2, "0")}/${String(method.card.exp_year).slice(-2)}` : "",
-        })),
-        ...bankAccounts.data.map((method) => ({
-          id: method.id,
-          type: "bank",
-          label: `${method.us_bank_account?.bank_name ?? "Bank account"} •${method.us_bank_account?.last4 ?? ""}`,
-          detail: "ACH bank account",
         })),
       ],
     };
@@ -1119,10 +1116,13 @@ export const refreshBooking = onCall(
   },
 );
 
-async function connectedAccountId(driverId: string): Promise<string> {
-  const snapshot = await db.collection("payment_accounts").doc(driverId).get();
-  const accountId = snapshot.data()?.stripeAccountId;
-  return typeof accountId === "string" ? accountId : "";
+async function isAppReviewDemoPayout(
+  driverId: string,
+  payoutAccount: Json | undefined,
+): Promise<boolean> {
+  if (payoutAccount?.appReviewFixture !== true) return false;
+  const user = await auth.getUser(driverId);
+  return user.customClaims?.appReviewDemo === true;
 }
 
 async function transferDriverShare(params: {
@@ -1135,7 +1135,15 @@ async function transferDriverShare(params: {
   sourceTransaction?: string;
 }): Promise<string> {
   if (params.amountCents <= 0) return "";
-  const accountId = await connectedAccountId(params.driverId);
+  const payoutAccount = (await db.collection("payment_accounts")
+    .doc(params.driverId).get()).data();
+  if (await isAppReviewDemoPayout(params.driverId, payoutAccount)) {
+    return `app_review_${createHash("sha256")
+      .update(`${params.reason}:${params.bookingId}:${params.attempt}`)
+      .digest("hex").slice(0, 24)}`;
+  }
+  const accountId = typeof payoutAccount?.stripeAccountId === "string" ?
+    payoutAccount.stripeAccountId : "";
   if (!accountId) {
     await db.collection("payout_obligations").doc(`${params.reason}_${params.bookingId}`).set({
       ...params,
@@ -2138,7 +2146,22 @@ export const getDriverPayoutStatus = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Please sign in again.");
     await requireVerifiedUser(request.auth.uid, true);
-    const accountId = await connectedAccountId(request.auth.uid);
+    const payoutAccount = (await db.collection("payment_accounts")
+      .doc(request.auth.uid).get()).data();
+    if (request.auth.token.appReviewDemo === true &&
+        payoutAccount?.appReviewFixture === true) {
+      return {
+        connected: true,
+        payoutsEnabled: true,
+        detailsSubmitted: true,
+        bankName: String(payoutAccount.bankName ?? "App Review Demo Bank"),
+        last4: String(payoutAccount.last4 ?? "4242"),
+        availableCents: 12_500,
+        pendingCents: 3_325,
+      };
+    }
+    const accountId = typeof payoutAccount?.stripeAccountId === "string" ?
+      payoutAccount.stripeAccountId : "";
     if (!accountId) {
       return {
         connected: false,

@@ -104,10 +104,10 @@ Users may:
 
 ## Children's privacy
 
-SideCar is intended for users age 13 and older and for verified college-student
-communities. The service is not directed to children under 13. If SideCar learns
-that information from a child under 13 was collected, it will take appropriate
-steps to delete it.
+SideCar is intended only for adults age 18 and older in eligible verified
+college-student communities. Users must confirm that they are at least 18 when
+registering. If SideCar learns that information from a minor was collected, it
+will take appropriate steps to delete it.
 
 ## Security and international processing
 

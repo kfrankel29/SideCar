@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,6 +30,8 @@ String? _emailError(String value) {
 }
 
 const _studentEmailRequired = 'Students only — ucsb.edu email required';
+
+bool get _offersGoogleSignIn => defaultTargetPlatform != TargetPlatform.iOS;
 
 void _popOrGo(BuildContext context, String fallbackRoute) {
   if (context.canPop()) {
@@ -388,17 +391,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               onPressed: AppHaptics.wrap(_loading ? null : _submit),
               child: Text(_loading ? 'Signing in…' : 'Log in'),
             ),
-            const SizedBox(height: 24),
-            const _OrDivider(),
-            const SizedBox(height: 18),
-            OutlinedButton(
-              onPressed: AppHaptics.wrap(_loading ? null : _continueWithGoogle),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: AppColors.softSurface,
-                side: BorderSide.none,
+            if (_offersGoogleSignIn) ...[
+              const SizedBox(height: 24),
+              const _OrDivider(),
+              const SizedBox(height: 18),
+              OutlinedButton(
+                onPressed: AppHaptics.wrap(
+                  _loading ? null : _continueWithGoogle,
+                ),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: AppColors.softSurface,
+                  side: BorderSide.none,
+                ),
+                child: const Text('Continue with Google'),
               ),
-              child: const Text('Continue with Google'),
-            ),
+            ],
             const Spacer(),
             Center(
               child: TextButton(

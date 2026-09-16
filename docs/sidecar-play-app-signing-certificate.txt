@@ -1,0 +1,10 @@
+SideCar Google Play app-signing certificate fingerprint
+Package: com.kaileefrankel.sidecar
+Firebase project: sidecar-fb0e7
+
+SHA-256: 11:2C:64:74:97:C4:5B:2C:E6:3D:BE:3B:FC:3D:F8:94:8F:D7:29:A3:D5:22:BA:48:1A:5D:FC:FB:0D:67:55:FC
+SHA-1: C3:D4:E9:15:30:19:4E:30:A6:A6:FA:AD:41:3A:F4:A0:43:A2:7B:CF
+
+Verified on 2026-09-16 against the APK installed from Google Play internal testing (build 79), and the SHA-256 is registered on the SideCar Firebase Android app.
+
+This file contains public certificate fingerprints only. It does not contain the app-signing private key, upload keystore, or any password.
