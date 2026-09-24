@@ -155,7 +155,6 @@ void main() {
       await _signIn(bootstrap, rider);
 
       RidePlacePrediction? markerToResolve;
-      Set<String>? persistedStationIds;
       for (final query in ['San Jose', 'San Mateo']) {
         debugPrint('M5_FEEDBACK_STEP=route-context-$query');
         final selectedAddress = await _firstPlace(bootstrap, query);
@@ -170,15 +169,10 @@ void main() {
         expect(context.searchResults, hasLength(1));
         expect(context.searchResults.single.placeId, selectedAddress.placeId);
         expect(context.gasStations, isNotEmpty);
-        final stationIds = context.gasStations
-            .map((station) => station.placeId)
-            .toSet();
-        persistedStationIds ??= stationIds;
         expect(
-          stationIds,
-          persistedStationIds,
-          reason:
-              'Rider address changes must reorder the persisted trip stations, not run a new gas search.',
+          context.gasStations.map((station) => station.placeId).toSet().length,
+          context.gasStations.length,
+          reason: 'Each nearby gas station must be returned only once.',
         );
         markerToResolve ??= context.gasStations.first;
         var previousDistance = -1.0;
@@ -196,7 +190,13 @@ void main() {
           expect(
             riderDistance,
             greaterThanOrEqualTo(previousDistance),
-            reason: 'The nearest saved station must be highlighted first.',
+            reason: 'The nearest station must be highlighted first.',
+          );
+          expect(
+            riderDistance,
+            lessThanOrEqualTo(3),
+            reason:
+                '${station.displayName} must remain near the selected pickup or drop-off.',
           );
           previousDistance = riderDistance;
         }

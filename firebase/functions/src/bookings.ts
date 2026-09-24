@@ -482,7 +482,7 @@ async function validatedBookingStops(params: {
   if (!pickupMatch.allowed || !dropoffMatch.allowed) {
     throw new HttpsError(
       "failed-precondition",
-      "Both addresses must be within 1 mile of the driver’s route or student housing (Isla Vista / UCSB housing).",
+      "Both addresses must be within 0.5 miles of the driver’s route or student housing (Isla Vista / UCSB housing).",
     );
   }
   if (pickupMatch.progress > dropoffMatch.progress) {

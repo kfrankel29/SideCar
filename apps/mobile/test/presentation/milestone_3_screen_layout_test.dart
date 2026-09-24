@@ -182,6 +182,16 @@ void main() {
     expect(find.text('Backpack'), findsOneWidget);
     expect(find.text('1 suitcase'), findsOneWidget);
     expect(find.text('2+ bags'), findsOneWidget);
+    final luggageText = find.text('2+ bags');
+    final luggageChip = find.ancestor(
+      of: luggageText,
+      matching: find.byType(AnimatedContainer),
+    );
+    expect(luggageChip, findsOneWidget);
+    expect(
+      tester.getSize(luggageChip).width,
+      greaterThan(tester.getSize(luggageText).width),
+    );
     expect(find.text('Post ride · earn ~\$0'), findsNothing);
     expect(find.text('Post ride'), findsOneWidget);
     await tester.scrollUntilVisible(
@@ -402,6 +412,43 @@ void main() {
       expect(text.maxLines, isNull);
       expect(text.overflow, isNot(TextOverflow.ellipsis));
     }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('route input card expands so long locations never overlap', (
+    tester,
+  ) async {
+    await setPhoneSize(tester);
+    const longOrigin =
+        'San Francisco International Airport (SFO), San Francisco, CA, USA';
+    const longDestination =
+        'University of California Santa Barbara, Santa Barbara, CA, USA';
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: const Scaffold(
+          body: Padding(
+            padding: EdgeInsets.all(24),
+            child: RideRouteCard(
+              key: ValueKey('long-route-card'),
+              origin: longOrigin,
+              destination: longDestination,
+              originPlaceholder: 'Departure City',
+              destinationPlaceholder: 'Destination City',
+              minimumHeight: 109,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final originRect = tester.getRect(find.text(longOrigin));
+    final destinationRect = tester.getRect(find.text(longDestination));
+    expect(
+      tester.getSize(find.byKey(const ValueKey('long-route-card'))).height,
+      greaterThan(109),
+    );
+    expect(originRect.bottom, lessThan(destinationRect.top));
     expect(tester.takeException(), isNull);
   });
 

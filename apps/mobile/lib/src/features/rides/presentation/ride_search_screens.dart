@@ -256,16 +256,13 @@ class _SearchRidesScreenState extends ConsumerState<SearchRidesScreen> {
                   onBack: () => context.go(AppRoutes.home),
                 ),
                 const SizedBox(height: 25),
-                SizedBox(
-                  height: 140,
-                  child: RideRouteCard(
-                    origin: _origin,
-                    destination: _destination,
-                    originPlaceholder: 'Pick Up Location',
-                    destinationPlaceholder: 'Drop Off Location',
-                    onOriginTap: _pickOrigin,
-                    onDestinationTap: _pickDestination,
-                  ),
+                RideRouteCard(
+                  origin: _origin,
+                  destination: _destination,
+                  originPlaceholder: 'Pick Up Location',
+                  destinationPlaceholder: 'Drop Off Location',
+                  onOriginTap: _pickOrigin,
+                  onDestinationTap: _pickDestination,
                 ),
                 const SizedBox(height: 27),
                 const _SectionLabel('When'),

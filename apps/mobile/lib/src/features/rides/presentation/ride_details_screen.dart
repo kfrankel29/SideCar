@@ -1200,6 +1200,8 @@ class _SeatRequestSheetState extends State<_SeatRequestSheet> {
       context,
       title: 'Exact pickup address',
       rideId: widget.ride.id,
+      showGasStations: true,
+      stopLabel: 'pickup',
       initialQuery: _pickup?.displayName ?? widget.ride.origin.displayName,
     );
     if (place != null && mounted) setState(() => _pickup = place);
@@ -1210,6 +1212,8 @@ class _SeatRequestSheetState extends State<_SeatRequestSheet> {
       context,
       title: 'Exact drop-off address',
       rideId: widget.ride.id,
+      showGasStations: true,
+      stopLabel: 'drop-off',
       initialQuery:
           _dropoff?.displayName ?? widget.ride.destination.displayName,
     );
@@ -1249,7 +1253,7 @@ class _SeatRequestSheetState extends State<_SeatRequestSheet> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Both addresses must be within 1 mile of the driver’s route or student housing (Isla Vista / UCSB housing).',
+            'Both addresses must be within 0.5 miles of the driver’s route or student housing (Isla Vista / UCSB housing).',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 20),

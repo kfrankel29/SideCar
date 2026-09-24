@@ -360,10 +360,15 @@ void main() {
 
     expect(repository.requestedGasStations, isTrue);
     expect(repository.gasStationRequestCount, 1);
-    expect(find.text('Center saved gas stations'), findsOneWidget);
-    expect(find.text('Closest gas stations to Dropped pin'), findsOneWidget);
+    expect(find.text('Search nearby gas stations'), findsOneWidget);
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Gas stations near Dropped pin and within 0.5 miles of the route',
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Central Coast Gas'), findsOneWidget);
     await tester.tap(find.text('Central Coast Gas'));
     await tester.pumpAndSettle();
@@ -375,7 +380,7 @@ void main() {
     expect(find.text('Use this address'), findsOneWidget);
     expect(find.byIcon(Icons.check_circle), findsWidgets);
     final requestsBeforeReload = repository.gasStationRequestCount;
-    await tester.tap(find.text('Center saved gas stations'));
+    await tester.tap(find.text('Search nearby gas stations'));
     await tester.pumpAndSettle();
     expect(repository.gasStationRequestCount, requestsBeforeReload);
     expect(tester.takeException(), isNull);
@@ -461,8 +466,43 @@ void main() {
     expect(find.byKey(const ValueKey('interactive-route-map')), findsOneWidget);
     expect(find.text('Use this address'), findsOneWidget);
     expect(repository.requestedGasStations, isTrue);
-    expect(find.text('Center saved gas stations'), findsOneWidget);
+    expect(find.text('Search nearby gas stations'), findsOneWidget);
     expect(find.text('Central Coast Gas'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pickup picker offers nearby gas stations', (tester) async {
+    await setPhoneSize(tester);
+    final repository = _RoutePickerFake();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [rideRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: const Scaffold(
+            body: PlacePickerSheet(
+              title: 'Exact pickup address',
+              initialQuery: '',
+              rideId: 'ride-1',
+              stopLabel: 'pickup',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('route-stop-map')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Search nearby gas stations'), findsOneWidget);
+    expect(repository.requestedGasStations, isTrue);
+    expect(
+      find.text(
+        'Gas stations near Dropped pin and within 0.5 miles of the route',
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 

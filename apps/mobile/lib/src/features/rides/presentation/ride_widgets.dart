@@ -3,6 +3,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -411,6 +413,7 @@ class RideRouteCard extends StatelessWidget {
     this.showBorder = true,
     this.routeMarkerColor = AppColors.primary,
     this.locationTextStyle,
+    this.minimumHeight = 140,
   });
 
   final String origin;
@@ -426,9 +429,16 @@ class RideRouteCard extends StatelessWidget {
   final bool showBorder;
   final Color routeMarkerColor;
   final TextStyle? locationTextStyle;
+  final double minimumHeight;
 
   @override
   Widget build(BuildContext context) {
+    const verticalPadding = 24.0;
+    const dividerHeight = 12.0;
+    final minimumLocationHeight = math.max(
+      0,
+      (minimumHeight - verticalPadding - dividerHeight) / 2,
+    ).toDouble();
     return InkWell(
       onTap: onTap == null ? null : AppHaptics.wrap(onTap),
       borderRadius: BorderRadius.circular(12),
@@ -439,74 +449,82 @@ class RideRouteCard extends StatelessWidget {
           border: showBorder ? Border.all(color: AppColors.border) : null,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              width: 18,
-              child: Column(
-                children: [
-                  Container(
-                    width: 14,
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: routeMarkerColor, width: 2),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 18,
+                child: Column(
+                  children: [
+                    Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: routeMarkerColor, width: 2),
+                      ),
                     ),
-                  ),
-                  Expanded(
-                    child: CustomPaint(
-                      painter: _DottedLinePainter(),
-                      child: const SizedBox(width: 1),
+                    Expanded(
+                      child: CustomPaint(
+                        painter: _DottedLinePainter(),
+                        child: const SizedBox(width: 1),
+                      ),
                     ),
-                  ),
-                  CircleAvatar(radius: 6, backgroundColor: routeMarkerColor),
-                ],
+                    CircleAvatar(radius: 6, backgroundColor: routeMarkerColor),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: onOriginTap == null
-                          ? null
-                          : AppHaptics.wrap(onOriginTap!),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: _RouteLocationText(
-                          title: origin,
-                          placeholder: originPlaceholder,
-                          subtitle: originSubtitle,
-                          textStyle: locationTextStyle,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: minimumLocationHeight,
+                      ),
+                      child: InkWell(
+                        onTap: onOriginTap == null
+                            ? null
+                            : AppHaptics.wrap(onOriginTap!),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: _RouteLocationText(
+                            title: origin,
+                            placeholder: originPlaceholder,
+                            subtitle: originSubtitle,
+                            textStyle: locationTextStyle,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const Divider(height: 12),
-                  Expanded(
-                    child: InkWell(
-                      onTap: onDestinationTap == null
-                          ? null
-                          : AppHaptics.wrap(onDestinationTap!),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: _RouteLocationText(
-                          title: destination,
-                          placeholder: destinationPlaceholder,
-                          subtitle: destinationSubtitle,
-                          textStyle: locationTextStyle,
+                    const Divider(height: dividerHeight),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: minimumLocationHeight,
+                      ),
+                      child: InkWell(
+                        onTap: onDestinationTap == null
+                            ? null
+                            : AppHaptics.wrap(onDestinationTap!),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: _RouteLocationText(
+                            title: destination,
+                            placeholder: destinationPlaceholder,
+                            subtitle: destinationSubtitle,
+                            textStyle: locationTextStyle,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -695,6 +713,12 @@ class _RideMapPreviewState extends State<RideMapPreview> {
                         tiltGesturesEnabled: true,
                         zoomControlsEnabled: false,
                         zoomGesturesEnabled: true,
+                        gestureRecognizers:
+                            <Factory<OneSequenceGestureRecognizer>>{
+                              Factory<EagerGestureRecognizer>(
+                                EagerGestureRecognizer.new,
+                              ),
+                            },
                         onMapCreated: (controller) {
                           _controller = controller;
                           unawaited(_fitRoute(route));

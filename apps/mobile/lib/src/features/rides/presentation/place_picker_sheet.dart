@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -17,6 +19,8 @@ Future<RidePlacePrediction?> showRidePlacePicker(
   required String title,
   String initialQuery = '',
   String rideId = '',
+  bool showGasStations = true,
+  String stopLabel = 'destination',
 }) {
   return showModalBottomSheet<RidePlacePrediction>(
     context: context,
@@ -28,6 +32,8 @@ Future<RidePlacePrediction?> showRidePlacePicker(
         title: title,
         initialQuery: initialQuery,
         rideId: rideId,
+        showGasStations: showGasStations,
+        stopLabel: stopLabel,
       ),
     ),
   );
@@ -38,12 +44,16 @@ class PlacePickerSheet extends ConsumerStatefulWidget {
     required this.title,
     required this.initialQuery,
     this.rideId = '',
+    this.showGasStations = true,
+    this.stopLabel = 'destination',
     super.key,
   });
 
   final String title;
   final String initialQuery;
   final String rideId;
+  final bool showGasStations;
+  final String stopLabel;
 
   @override
   ConsumerState<PlacePickerSheet> createState() => _PlacePickerSheetState();
@@ -162,7 +172,8 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
     bool? includeGasStations,
   }) async {
     if (widget.rideId.isEmpty) return;
-    final shouldLoadGasStations = includeGasStations ?? _gasStationsLoaded;
+    final shouldLoadGasStations =
+        widget.showGasStations && (includeGasStations ?? _gasStationsLoaded);
     setState(() {
       _loadingMap = true;
       _loadingGasStations = shouldLoadGasStations;
@@ -219,13 +230,14 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
       return;
     }
     final choosingGasStation =
-        _routeContext?.gasStations.any(
-          (station) => station.placeId == place.placeId,
-        ) ??
-        false;
+        widget.showGasStations &&
+        (_routeContext?.gasStations.any(
+              (station) => station.placeId == place.placeId,
+            ) ??
+            false);
     setState(() {
       _selected = place;
-      if (!choosingGasStation) {
+      if (widget.showGasStations && !choosingGasStation) {
         _gasStationsLoaded = true;
         _gasStationSearchQuery = place.mainText;
       }
@@ -238,7 +250,10 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
     unawaited(
       choosingGasStation
           ? _moveNativeMapToContext(_routeContext!, preferGasStations: true)
-          : _loadRouteContext(selected: place, includeGasStations: true),
+          : _loadRouteContext(
+              selected: place,
+              includeGasStations: widget.showGasStations,
+            ),
     );
   }
 
@@ -439,7 +454,9 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
           if (!showingSearch && widget.rideId.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              'Tap the map to drop an exact pin, search an address, or use Show gas stations for stops along the route.',
+              widget.showGasStations
+                  ? 'Tap the map to drop an exact pin, search an address, or find gas stations near this ${widget.stopLabel} and along the route.'
+                  : 'Tap the map to drop an exact pin or search an address along the route.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 14),
@@ -524,7 +541,7 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
                 _selected == null ? 'Choose a pin' : 'Use this address',
               ),
             ),
-            if (_selected != null) ...[
+            if (widget.showGasStations && _selected != null) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 key: const ValueKey('show-gas-stations'),
@@ -538,23 +555,22 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
                 label: Text(
                   _loadingGasStations
                       ? 'Loading gas stations…'
-                      : _gasStationsLoaded
-                      ? 'Center saved gas stations'
-                      : 'Show gas stations',
+                      : 'Search nearby gas stations',
                 ),
               ),
             ],
           ],
           if (!showingSearch &&
               widget.rideId.isNotEmpty &&
+              widget.showGasStations &&
               _gasStationsLoaded &&
               _routeContext?.gasStations.isNotEmpty == true) ...[
             Padding(
               padding: EdgeInsets.only(top: _places.isEmpty ? 0 : 14),
               child: Text(
                 _gasStationSearchQuery.isEmpty
-                    ? 'Gas stations within 0.5 miles of the route'
-                    : 'Closest gas stations to $_gasStationSearchQuery',
+                    ? 'Gas stations near this ${widget.stopLabel} and within 0.5 miles of the route'
+                    : 'Gas stations near $_gasStationSearchQuery and within 0.5 miles of the route',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
@@ -573,14 +589,15 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
           ],
           if (!showingSearch &&
               widget.rideId.isNotEmpty &&
+              widget.showGasStations &&
               _gasStationsLoaded &&
               _routeContext?.gasStations.isEmpty == true)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
                 _gasStationSearchQuery.isEmpty
-                    ? 'No gas stations found within 0.5 miles of this route.'
-                    : 'No gas stations found near $_gasStationSearchQuery.',
+                    ? 'No gas stations found near this ${widget.stopLabel} and within 0.5 miles of the route.'
+                    : 'No gas stations found near $_gasStationSearchQuery and within 0.5 miles of the route.',
               ),
             ),
           if (!showingSearch && widget.rideId.isNotEmpty)
@@ -679,6 +696,9 @@ class _PlacePickerSheetState extends ConsumerState<PlacePickerSheet> {
             tiltGesturesEnabled: true,
             zoomControlsEnabled: false,
             zoomGesturesEnabled: true,
+            gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+              Factory<EagerGestureRecognizer>(EagerGestureRecognizer.new),
+            },
             onTap: _dropNativePin,
             onLongPress: _dropNativePin,
             onMapCreated: (controller) {

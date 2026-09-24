@@ -56,7 +56,7 @@
       "valueType": "STRING"
     },
     "max_route_detour_miles": {
-      "defaultValue": {"value": "1"},
+      "defaultValue": {"value": "0.5"},
       "description": "Maximum pickup or drop-off distance from the driver's encoded route, in miles.",
       "valueType": "NUMBER"
     },

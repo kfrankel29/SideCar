@@ -827,6 +827,29 @@ async function smoke() {
       throw new Error("The deployed ACH shutdown check failed.");
     }
     results.rider.achDisabled = true;
+
+    const cardResponse = await fetch(
+      `https://us-central1-${projectId}.cloudfunctions.net/createPaymentMethodSetup`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${sessions.rider.idToken}`,
+          "content-type": "application/json",
+          "x-firebase-appcheck": exchange.token,
+        },
+        body: JSON.stringify({data: {paymentMethod: "card"}}),
+      },
+    );
+    const cardBody = await cardResponse.json();
+    const cardSetup = cardBody.result;
+    if (!cardResponse.ok ||
+        !String(cardSetup?.publishableKey ?? "").startsWith("pk_live_") ||
+        !String(cardSetup?.clientSecret ?? "").startsWith("seti_") ||
+        !String(cardSetup?.customerId ?? "").startsWith("cus_") ||
+        !cardSetup?.ephemeralKeySecret) {
+      throw new Error("The deployed live card setup check failed.");
+    }
+    results.rider.liveCardSetup = true;
   } finally {
     await fetch(`https://firebaseappcheck.googleapis.com/v1/${registration.name}`, {
       method: "DELETE",

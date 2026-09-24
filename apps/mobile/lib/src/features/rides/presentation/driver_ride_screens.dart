@@ -202,21 +202,19 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
             onBack: () => context.go(AppRoutes.home),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            height: 109,
-            child: RideRouteCard(
-              origin: _origin?.displayName ?? '',
-              destination: _destination?.displayName ?? '',
-              originPlaceholder: 'Departure City',
-              destinationPlaceholder: 'Destination City',
-              routeMarkerColor: AppColors.ink,
-              locationTextStyle: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-              ),
-              onOriginTap: () => _pickPlace(true),
-              onDestinationTap: () => _pickPlace(false),
+          RideRouteCard(
+            origin: _origin?.displayName ?? '',
+            destination: _destination?.displayName ?? '',
+            originPlaceholder: 'Departure City',
+            destinationPlaceholder: 'Destination City',
+            routeMarkerColor: AppColors.ink,
+            minimumHeight: 109,
+            locationTextStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w400,
             ),
+            onOriginTap: () => _pickPlace(true),
+            onDestinationTap: () => _pickPlace(false),
           ),
           const SizedBox(height: 14),
           Row(
@@ -316,18 +314,15 @@ class _PostRideScreenState extends ConsumerState<PostRideScreen> {
             child: Row(
               children: [
                 for (final entry in const [
-                  (LuggageAllowance.backpack, 'Backpack', 89.0),
-                  (LuggageAllowance.oneSuitcase, '1 suitcase', 105.0),
-                  (LuggageAllowance.twoPlusBags, '2+ bags', 82.0),
+                  (LuggageAllowance.backpack, 'Backpack'),
+                  (LuggageAllowance.oneSuitcase, '1 suitcase'),
+                  (LuggageAllowance.twoPlusBags, '2+ bags'),
                 ]) ...[
-                  SizedBox(
-                    width: entry.$3,
-                    child: RideChoiceChip(
-                      label: entry.$2,
-                      selected: _luggage == entry.$1,
-                      compact: true,
-                      onTap: () => setState(() => _luggage = entry.$1),
-                    ),
+                  RideChoiceChip(
+                    label: entry.$2,
+                    selected: _luggage == entry.$1,
+                    compact: true,
+                    onTap: () => setState(() => _luggage = entry.$1),
                   ),
                   const SizedBox(width: 9),
                 ],

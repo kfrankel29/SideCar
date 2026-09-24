@@ -43,6 +43,16 @@ key_password="$(/usr/bin/security find-generic-password -a SideCar -s "$keychain
 maps_api_key="$(jq -r '.MAPS_API_KEY' "$config_file")"
 
 cd "$mobile_root"
+
+# Running an integration test makes Flutter's generated main registrant include
+# the debug-only integration_test plugin. The release variant intentionally
+# does not package that plugin, so remove only that generated registration
+# block before compiling the production bundle.
+generated_registrant="$mobile_root/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java"
+if [[ -f "$generated_registrant" ]]; then
+  /usr/bin/perl -0pi -e 's/\n    try \{\n      flutterEngine\.getPlugins\(\)\.add\(new dev\.flutter\.plugins\.integration_test\.IntegrationTestPlugin\(\)\);\n    \} catch \(Exception e\) \{\n      Log\.e\(TAG, "Error registering plugin integration_test, dev\.flutter\.plugins\.integration_test\.IntegrationTestPlugin", e\);\n    \}//g' "$generated_registrant"
+fi
+
 build_args=(
   --release
   --no-pub

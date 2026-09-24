@@ -195,7 +195,7 @@ void main() {
     expect(find.text('Confirm your stops'), findsOneWidget);
     expect(find.text('Choose pickup address'), findsOneWidget);
     expect(find.text('Choose drop-off address'), findsOneWidget);
-    expect(find.textContaining('within 1 mile'), findsOneWidget);
+    expect(find.textContaining('within 0.5 miles'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await capture('m4-seat-request-stops');
     if (holdForExternalCapture) {

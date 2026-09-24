@@ -22,6 +22,7 @@ const milesPerLatitudeDegree = 69.0;
 // appearing outside the visible route corridor because of map projection and
 // marker size.
 export const gasStationRouteMaximumMiles = 0.5;
+export const gasStationDestinationMaximumMiles = 3;
 
 export function searchRadiusMilesForPlace(
   placeTypes: ReadonlyArray<string>,
@@ -69,6 +70,20 @@ export function gasStationMatchesRoute(
 ): boolean {
   return route.length >= 2 &&
     proximityToRoute(point, route).distanceMiles <= gasStationRouteMaximumMiles;
+}
+
+export function gasStationMatchesRouteAndDestination(
+  point: GeoPoint,
+  route: ReadonlyArray<GeoPoint>,
+  destination: GeoPoint,
+): boolean {
+  return pointMatchesRouteAndSearchArea({
+    point,
+    route,
+    searchAnchors: [destination],
+    maximumRouteDistanceMiles: gasStationRouteMaximumMiles,
+    maximumSearchDistanceMiles: gasStationDestinationMaximumMiles,
+  });
 }
 
 export function storedGasStationsForRider(params: {

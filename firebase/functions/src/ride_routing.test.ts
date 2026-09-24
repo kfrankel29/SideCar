@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   decodeGooglePolyline,
   distanceMilesBetween,
+  gasStationDestinationMaximumMiles,
   gasStationMatchesRoute,
+  gasStationMatchesRouteAndDestination,
   gasStationRouteMaximumMiles,
   pointMatchesRouteAndSearchArea,
   pointInPolygon,
@@ -101,6 +103,43 @@ test("gas station pins stay inside the half-mile route boundary", () => {
   assert.equal(gasStationMatchesRoute(justOutsideHalfMile, route), false);
 });
 
+test("destination gas stations satisfy both the route and three-mile destination limits", () => {
+  const route = [
+    {latitude: 37.30, longitude: -121.90},
+    {latitude: 37.50, longitude: -121.90},
+  ];
+  const destination = {latitude: 37.48, longitude: -121.90};
+  const nearDestinationAndRoute = {latitude: 37.47, longitude: -121.895};
+  const onRouteButTooFarFromDestination = {latitude: 37.31, longitude: -121.90};
+  const nearDestinationButOffRoute = {latitude: 37.48, longitude: -121.88};
+
+  assert.equal(gasStationDestinationMaximumMiles, 3);
+  assert.equal(
+    gasStationMatchesRouteAndDestination(
+      nearDestinationAndRoute,
+      route,
+      destination,
+    ),
+    true,
+  );
+  assert.equal(
+    gasStationMatchesRouteAndDestination(
+      onRouteButTooFarFromDestination,
+      route,
+      destination,
+    ),
+    false,
+  );
+  assert.equal(
+    gasStationMatchesRouteAndDestination(
+      nearDestinationButOffRoute,
+      route,
+      destination,
+    ),
+    false,
+  );
+});
+
 test("rider maps reuse saved stations, filter the corridor, and sort by address", () => {
   const route = [
     {latitude: 37.30, longitude: -121.90},
@@ -179,5 +218,20 @@ test("rejects a point beyond the configured route corridor", () => {
     boundaryExceptions: [],
   });
   assert.ok(result.distanceMiles > 1);
+  assert.equal(result.allowed, false);
+});
+
+test("rejects an exact stop outside the half-mile route corridor", () => {
+  const result = routePointAllowed({
+    point: {latitude: 34.409, longitude: -119.85},
+    route: [
+      {latitude: 34.40, longitude: -119.90},
+      {latitude: 34.40, longitude: -119.80},
+    ],
+    maximumDetourMiles: 0.5,
+    boundaryExceptions: [],
+  });
+  assert.ok(result.distanceMiles > 0.5);
+  assert.ok(result.distanceMiles < 1);
   assert.equal(result.allowed, false);
 });

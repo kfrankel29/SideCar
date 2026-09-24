@@ -32,15 +32,20 @@ void main() {
     await file.writeAsBytes(bytes, flush: true);
     debugPrint('M5_FEEDBACK_SCREENSHOT=${file.path}');
     final client = HttpClient();
-    final request = await client.postUrl(
-      Uri.parse('http://127.0.0.1:8766/$name'),
-    );
-    request.contentLength = bytes.length;
-    request.add(bytes);
-    final response = await request.close();
-    await response.drain<void>();
-    client.close(force: true);
-    debugPrint('M5_FEEDBACK_SCREENSHOT_HTTP=$name:${response.statusCode}');
+    try {
+      final request = await client.postUrl(
+        Uri.parse('http://127.0.0.1:8766/$name'),
+      );
+      request.contentLength = bytes.length;
+      request.add(bytes);
+      final response = await request.close();
+      await response.drain<void>();
+      debugPrint('M5_FEEDBACK_SCREENSHOT_HTTP=$name:${response.statusCode}');
+    } on SocketException {
+      debugPrint('M5_FEEDBACK_SCREENSHOT_HTTP_SKIPPED=$name');
+    } finally {
+      client.close(force: true);
+    }
   }
 
   testWidgets('rating submit and skip both return to home', (tester) async {
@@ -188,20 +193,25 @@ void main() {
       expect(repository.requestedGasStations, isTrue);
       expect(repository.gasStationRequestCount, 1);
       expect(repository.gasStationQuery, isEmpty);
-      expect(find.text('Center saved gas stations'), findsOneWidget);
+      expect(find.text('Search nearby gas stations'), findsOneWidget);
       updatedMap = tester.widget<GoogleMap>(mapFinder);
       expect(updatedMap.markers, hasLength(8));
       await tester.drag(find.byType(ListView), const Offset(0, -450));
       await tester.pumpAndSettle();
       expect(
-        find.text('Closest gas stations to San Jose Airport'),
+        find.text(
+          'Gas stations near San Jose Airport and within 0.5 miles of the route',
+        ),
         findsOneWidget,
       );
       expect(find.text('Feedback Test Gas'), findsOneWidget);
-      expect(find.text('Second Test Gas'), findsOneWidget);
+      expect(find.text('Closest'), findsOneWidget);
+      expect(find.text('Second Test Gas', skipOffstage: false), findsOneWidget);
+      final thirdGas = find.text('Third Test Gas', skipOffstage: false);
+      await tester.ensureVisible(thirdGas);
+      await tester.pumpAndSettle();
       expect(find.text('Third Test Gas'), findsOneWidget);
       expect(find.text('Hidden Test Gas'), findsNothing);
-      expect(find.text('Closest'), findsOneWidget);
       if (visualPauseMs > 0) {
         debugPrint('M5_FEEDBACK_VISUAL_PAUSE=$visualPauseMs');
         await Future<void>.delayed(Duration(milliseconds: visualPauseMs));
@@ -253,7 +263,12 @@ void main() {
         gasRequestsBeforeSecondSearch + 1,
       );
       expect(repository.gasStationQuery, isEmpty);
-      expect(find.text('Closest gas stations to San Mateo'), findsOneWidget);
+      expect(
+        find.text(
+          'Gas stations near San Mateo and within 0.5 miles of the route',
+        ),
+        findsOneWidget,
+      );
       expect(find.text('Feedback Test Gas'), findsOneWidget);
 
       updatedMap.onTap?.call(const LatLng(37.335, -121.89));
